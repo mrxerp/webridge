@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{TITLE}}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div class="container" id="container">
+
+        <section id="loginSection" hidden>
+            <div class="login-card">
+                <h1 class="login-title">{{TITLE}}</h1>
+                <p class="subtitle">Enter your credentials to continue.</p>
+                <form id="loginForm" autocomplete="on">
+                    <label for="loginUsername" class="visually-hidden">Username</label>
+                    <input type="text" id="loginUsername" placeholder="Username" autocomplete="username" required>
+                    <label for="loginPassword" class="visually-hidden">Password</label>
+                    <input type="password" id="loginPassword" placeholder="Password" autocomplete="current-password" required>
+                    <button id="loginBtn" type="submit" class="btn btn-primary btn-block">
+                        <span class="btn-text">Sign In</span>
+                        <span class="btn-loader" hidden></span>
+                    </button>
+                </form>
+                <p id="loginError" class="error-message" hidden></p>
+            </div>
+        </section>
+
+        <div id="appView" hidden>
+            <header>
+                <div class="topbar">
+                    <a class="logo" href="/" title="Home">
+                        <h1>{{TITLE}}</h1>
+                    </a>
+                    <div class="dropdown">
+                        <button id="userMenuBtn" type="button" class="user-menu-btn">
+                            <span id="userName"></span>
+                            <svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="6 9 12 15 18 9"></polyline>
+                            </svg>
+                        </button>
+                        <div id="userMenu" class="dropdown-menu" hidden>
+                            <button class="menu-item" type="button" data-view="download">Download</button>
+                            <button class="menu-item" type="button" data-view="dashboard" data-perm="dashboard">Dashboard</button>
+                            <button class="menu-item" type="button" data-view="audit" data-perm="audit">Audit Log</button>
+                            <button class="menu-item" type="button" data-view="users" data-perm="users">Users</button>
+                            <button class="menu-item" type="button" data-view="groups" data-perm="groups">Groups</button>
+                            <div class="menu-divider"></div>
+                            <button id="logoutBtn" class="menu-item" type="button">Logout</button>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <main>
+                <div id="downloadView">
+                    <section class="input-section" id="inputSection">
+                        <div class="input-group">
+                            <label for="urlInput" class="visually-hidden">WeTransfer URL</label>
+                            <input 
+                                type="url" 
+                                id="urlInput" 
+                                placeholder="Paste a WeTransfer link..."
+                                autocomplete="off"
+                                spellcheck="false"
+                            >
+                            <button id="checkBtn" type="button" class="btn btn-primary">
+                                <span class="btn-text">Check File</span>
+                                <span class="btn-loader" hidden></span>
+                            </button>
+                        </div>
+                        <p id="urlError" class="error-message" hidden></p>
+                    </section>
+
+                    <section class="input-section" id="passwordSection" hidden>
+                        <div class="password-message" id="passwordMessage">This transfer is password-protected.</div>
+                        <div class="input-group">
+                            <label for="passwordInput" class="visually-hidden">Transfer Password</label>
+                            <input 
+                                type="password" 
+                                id="passwordInput" 
+                                placeholder="Enter transfer password"
+                                autocomplete="off"
+                            >
+                            <button id="passwordBtn" type="button" class="btn btn-primary">
+                                <span class="btn-text">Submit</span>
+                                <span class="btn-loader" hidden></span>
+                            </button>
+                        </div>
+                        <p id="passwordError" class="error-message" hidden></p>
+                    </section>
+
+                    <section class="info-section" id="infoSection" hidden>
+                        <div class="file-info-card">
+                            <div class="file-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                    <polyline points="14 2 14 8 20 8"></polyline>
+                                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                                    <polyline points="10 9 9 9 8 9"></polyline>
+                                </svg>
+                            </div>
+                            <div class="file-details">
+                                <h2 id="fileName">filename.ext</h2>
+                                <div class="file-meta">
+                                    <span id="fileSize">&mdash;</span>
+                                    <span id="fileCount" hidden>&bull; <span id="fileCountValue"></span> files</span>
+                                    <span id="providerBadge" class="badge">WeTransfer</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="action-row">
+                            <button id="downloadBtn" type="button" class="btn btn-download" disabled>
+                                <span class="btn-text">Download</span>
+                                <span class="btn-loader" hidden></span>
+                            </button>
+                            <button id="retryBtn" type="button" class="btn btn-secondary" hidden>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                                    <polyline points="23 4 23 10 17 10"></polyline>
+                                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                                </svg>
+                                <span>Try Another</span>
+                            </button>
+                        </div>
+
+                        <div class="progress-section" id="progressSection" hidden>
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+                            </div>
+                            <div class="progress-stats">
+                                <span id="progressPercent">0%</span>
+                                <span id="progressSpeed">&mdash;</span>
+                                <span id="progressEta">&mdash;</span>
+                            </div>
+                            <p id="progressStatus" class="progress-status">Preparing download...</p>
+                        </div>
+
+                        <p id="downloadError" class="error-message" hidden></p>
+                    </section>
+
+                    <section class="admin-section" id="recentSection" hidden>
+                        <h2 class="section-title">Recent</h2>
+                        <div class="table-wrap">
+                            <table class="audit-table">
+                                <thead>
+                                    <tr>
+                                        <th>File</th>
+                                        <th>Status</th>
+                                        <th>When</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="recentBody"></tbody>
+                            </table>
+                        </div>
+                    </section>
+                </div>
+
+                <div id="adminView" hidden>
+                    <section class="admin-section">
+                        <h2 class="section-title">Dashboard</h2>
+                        <div class="metrics-grid">
+                            <div class="metric-card">
+                                <span class="metric-value" id="metricActive">&mdash;</span>
+                                <span class="metric-label">Active Downloads</span>
+                            </div>
+                            <div class="metric-card">
+                                <span class="metric-value success" id="metricCompleted">&mdash;</span>
+                                <span class="metric-label">Downloaded</span>
+                            </div>
+                            <div class="metric-card">
+                                <span class="metric-value error" id="metricFailed">&mdash;</span>
+                                <span class="metric-label">Failed</span>
+                            </div>
+                            <div class="metric-card">
+                                <span class="metric-value" id="metricBytes">&mdash;</span>
+                                <span class="metric-label">Data Transferred</span>
+                            </div>
+                            <div class="metric-card">
+                                <span class="metric-value" id="metricLogins">&mdash;</span>
+                                <span class="metric-label">Logins</span>
+                            </div>
+                            <div class="metric-card">
+                                <span class="metric-value error" id="metricLoginFails">&mdash;</span>
+                                <span class="metric-label">Failed Logins</span>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+
+                <div id="auditView" hidden>
+                    <section class="admin-section">
+                        <h2 class="section-title">Audit Log</h2>
+                        <form id="auditFilterForm" class="inline-form">
+                            <select id="filterAction">
+                                <option value="">All actions</option>
+                            </select>
+                            <input type="text" id="filterUser" placeholder="User contains..." autocomplete="off">
+                            <label class="filter-label">From <input type="datetime-local" id="filterFrom"></label>
+                            <label class="filter-label">To <input type="datetime-local" id="filterTo"></label>
+                            <button class="btn btn-primary btn-small" type="submit">Apply</button>
+                            <button id="clearFiltersBtn" class="btn btn-secondary btn-small" type="button">Clear</button>
+                        </form>
+                        <div class="table-wrap">
+                            <table class="audit-table">
+                                <thead>
+                                    <tr>
+                                        <th>Time</th>
+                                        <th>User</th>
+                                        <th>Action</th>
+                                        <th>IP</th>
+                                        <th>Detail</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="auditBody">
+                                    <tr><td colspan="5" class="empty-row">No events yet.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+                </div>
+                <div id="usersView" hidden>
+                    <section class="admin-section">
+                        <h2 class="section-title">Local Users</h2>
+                        <h2 class="section-title">LDAP / SSO</h2>
+                        <form id="ldapForm" class="ldap-card ldap-form" hidden autocomplete="off">
+                            <label class="ldap-check"><input type="checkbox" id="ldapEnabled"> Enabled</label>
+                            <div class="ldap-grid">
+                                <input type="text" id="ldapHost" placeholder="Host, e.g. ad.example.com">
+                                <input type="number" id="ldapPort" placeholder="Port (389/636)">
+                                <input type="text" id="ldapBindDN" placeholder="Bind DN (empty = anonymous search)">
+                                <input type="password" id="ldapBindPassword" placeholder="Bind password (blank = unchanged)">
+                                <input type="text" id="ldapBaseDN" placeholder="Base DN, e.g. ou=people,dc=example,dc=com" class="ldap-wide">
+                                <input type="text" id="ldapFilter" placeholder='User filter, e.g. (uid=%s) or (sAMAccountName=%s)'>
+                                <input type="text" id="ldapGroups" placeholder="Default groups for new LDAP users (comma-separated)">
+                            </div>
+                            <div class="ldap-check">
+                                <label><input type="checkbox" id="ldapStartTLS"> StartTLS (plain port upgraded to TLS)</label>
+                                <label><input type="checkbox" id="ldapInsecure"> Skip TLS certificate verification</label>
+                            </div>
+                            <p id="ldapError" class="error-message" hidden></p>
+                            <button class="btn btn-primary btn-small" type="submit">
+                                <span class="btn-text">Save LDAP Settings</span>
+                                <span class="btn-loader" hidden></span>
+                            </button>
+                        </form>
+                        <form id="addUserForm" class="inline-form">
+                            <input type="text" id="newUsername" placeholder="Username" autocomplete="off" required>
+                            <input type="password" id="newPassword" placeholder="Password" autocomplete="new-password" required>
+                            <select id="newRole">
+                                <option value="user">user</option>
+                                <option value="admin">admin</option>
+                            </select>
+                            <button class="btn btn-primary btn-small" type="submit">
+                                <span class="btn-text">Add User</span>
+                                <span class="btn-loader" hidden></span>
+                            </button>
+                        </form>
+                        <p id="usersError" class="error-message" hidden></p>
+                        <div class="table-wrap">
+                            <table class="audit-table">
+                                <thead>
+                                    <tr>
+                                        <th>Username</th>
+                                        <th>Source</th>
+                                        <th>Role</th>
+                                        <th>Groups</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="usersBody"></tbody>
+                            </table>
+                        </div>
+                    </section>
+                </div>
+
+                <div id="groupsView" hidden>
+                    <section class="admin-section">
+                        <h2 class="section-title">Global Groups</h2>
+                        <p class="hint">Permissions: <code>download</code> use the downloader &middot; <code>dashboard</code> metrics &middot; <code>audit</code> audit log &middot; <code>users</code> manage users &amp; LDAP &middot; <code>groups</code> manage groups. Full access = the admin <em>role</em>, set per user.</p>
+                        <form id="addGroupForm" class="inline-form">
+                            <input type="text" id="newGroupName" placeholder="Group name" autocomplete="off" required>
+                            <span id="newGroupPerms"></span>
+                            <button class="btn btn-primary btn-small" type="submit">
+                                <span class="btn-text">Add Group</span>
+                                <span class="btn-loader" hidden></span>
+                            </button>
+                        </form>
+                        <p id="groupsError" class="error-message" hidden></p>
+                        <div class="table-wrap">
+                            <table class="audit-table">
+                                <thead>
+                                    <tr>
+                                        <th>Group</th>
+                                        <th>Permissions</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="groupsBody"></tbody>
+                            </table>
+                        </div>
+                    </section>
+                </div>
+
+            </main>
+
+            <footer>
+                <p>Files are streamed directly from WeTransfer. No files are stored on this server.</p>
+            </footer>
+        </div>
+    </div>
+
+    <script src="/app.js"></script>
+</body>
+</html>
