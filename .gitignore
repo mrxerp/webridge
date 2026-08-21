@@ -1,0 +1,4 @@
+bin/
+*.log
+.env
+ldap-settings.json

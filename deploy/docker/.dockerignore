@@ -1,0 +1,31 @@
+# Git
+.git
+.gitignore
+
+# Build artifacts
+proxy-downloader
+*.exe
+
+# Config
+config.yaml
+*.local.yaml
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Test
+coverage.out
+
+# Docs
+README.md
+docs/
