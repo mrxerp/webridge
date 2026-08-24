@@ -40,6 +40,11 @@ ui:
 
 auth:
   session_ttl: 24h
+  login_rate_limit:
+    max_attempts: 5
+    window_minutes: 15
+    backoff_base_minutes: 1
+    backoff_max_minutes: 64
   users:
     - username: "admin"
       password: "admin123"   # CHANGE THIS

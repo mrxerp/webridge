@@ -61,8 +61,16 @@ type AuditConfig struct {
 }
 
 type AuthConfig struct {
-	SessionTTL Duration     `yaml:"session_ttl"`
-	Users      []UserConfig `yaml:"users"`
+	SessionTTL    Duration        `yaml:"session_ttl"`
+	Users         []UserConfig    `yaml:"users"`
+	LoginRateLimit LoginRateConfig `yaml:"login_rate_limit"`
+}
+
+type LoginRateConfig struct {
+	MaxAttempts       int `yaml:"max_attempts"`
+	WindowMinutes     int `yaml:"window_minutes"`
+	BackoffBase       int `yaml:"backoff_base_minutes"`
+	BackoffMaxMinutes int `yaml:"backoff_max_minutes"`
 }
 
 type UserConfig struct {
@@ -168,6 +176,12 @@ func defaults() Config {
 			Users: []UserConfig{
 				{Username: "admin", Password: "admin123", Role: "admin"},
 				{Username: "user", Password: "user123", Role: "user"},
+			},
+			LoginRateLimit: LoginRateConfig{
+				MaxAttempts:       5,
+				WindowMinutes:     15,
+				BackoffBase:       1,
+				BackoffMaxMinutes: 64,
 			},
 		},
 		LDAP: LDAPConfig{Port: 389, UserFilter: "(uid=%s)", DefaultGroups: []string{"users"}},

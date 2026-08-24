@@ -56,6 +56,7 @@ type Service struct {
 	logger   *slog.Logger
 	ldapCfg  config.LDAPConfig // guarded by mu
 	ldapFile string
+	bf       *Bruteforce
 }
 
 // ponytail: SHA-256+salt instead of bcrypt to avoid a new dep; fine for a small self-hosted tool, swap for golang.org/x/crypto/bcrypt if this ever faces real attackers
@@ -77,6 +78,7 @@ func New(cfg *config.Config, logger *slog.Logger, ldapFile string) *Service {
 		logger:   logger,
 		ldapCfg:  cfg.LDAP,
 		ldapFile: ldapFile,
+		bf:       NewBruteforce(cfg.Auth.LoginRateLimit),
 	}
 	if data, err := os.ReadFile(ldapFile); err == nil {
 		var ov config.LDAPConfig
@@ -175,6 +177,16 @@ func (s *Service) Login(auditLog *audit.Log) http.HandlerFunc {
 		}
 
 		ip := middleware.ClientIP(r)
+
+		// Brute-force check
+		if locked, reason := s.bf.Check(ip, req.Username); locked {
+			auditLog.Add("login_locked", req.Username, ip, reason)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusLocked)
+			audit.WriteJSON(w, map[string]any{"error": reason})
+			return
+		}
+
 		u, exists, ok := s.verify(req.Username, req.Password)
 		viaLDAP := false
 		s.mu.Lock()
@@ -191,12 +203,14 @@ func (s *Service) Login(auditLog *audit.Log) http.HandlerFunc {
 		}
 		auditLog.Login(ok)
 		if !ok {
+			s.bf.RecordFailure(ip, req.Username)
 			auditLog.Add("login_failed", req.Username, ip, "")
 			s.logger.Warn("login failed", "username", req.Username, "ip", ip)
 			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 			return
 		}
 
+		s.bf.Reset(ip, req.Username)
 		tok := make([]byte, 32)
 		rand.Read(tok)
 		token := hex.EncodeToString(tok)

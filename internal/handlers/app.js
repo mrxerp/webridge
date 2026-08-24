@@ -267,7 +267,6 @@
 
     function switchTab(name) {
         if (VIEW_PERMS[name] && !can(VIEW_PERMS[name])) name = 'download';
-        trackEvent('view_' + name, name);
         elements.downloadView.hidden = name !== 'download';
         elements.adminView.hidden = name !== 'dashboard';
         elements.auditView.hidden = name !== 'audit';
