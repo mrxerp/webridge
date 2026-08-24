@@ -98,6 +98,10 @@ func main() {
 	mux.Handle("PUT /api/v1/admin/groups/{name}", guard("groups", http.HandlerFunc(authSvc.UpdateGroup(auditLog))))
 	mux.Handle("DELETE /api/v1/admin/groups/{name}", guard("groups", http.HandlerFunc(authSvc.DeleteGroup(auditLog))))
 
+	mux.Handle("GET /api/v1/admin/bruteforce", guard("users", http.HandlerFunc(authSvc.BruteforceStateHandler)))
+	mux.Handle("PUT /api/v1/admin/bruteforce/config", guard("users", http.HandlerFunc(authSvc.BruteforceConfigHandler)))
+	mux.Handle("POST /api/v1/admin/bruteforce/reset", guard("users", http.HandlerFunc(authSvc.BruteforceResetHandler)))
+
 	mux.Handle("/", uiHandler)
 
 	var handler http.Handler = mux

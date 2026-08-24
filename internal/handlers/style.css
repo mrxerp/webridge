@@ -789,3 +789,55 @@ footer a:hover {
     background: rgba(239, 68, 68, 0.1);
     border-color: var(--color-error);
 }
+
+.section-subtitle {
+    font-size: 0.9rem;
+    color: var(--color-text-secondary);
+    margin: 1rem 0 0.5rem;
+}
+
+.brute-force-config {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.brute-force-config .bf-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.brute-force-config .bf-field label {
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.brute-force-config .bf-field input {
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    padding: 0.4rem 0.6rem;
+    color: var(--color-text);
+    font-size: 0.85rem;
+}
+
+.brute-force-config .bf-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.lock-type-ip {
+    color: var(--color-primary);
+    font-weight: 500;
+}
+
+.lock-type-username {
+    color: var(--color-accent);
+    font-weight: 500;
+}

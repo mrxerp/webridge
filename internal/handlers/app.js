@@ -4,12 +4,13 @@
     const API_BASE = '/api/v1';
     const MAX_RETRIES = 3;
     const RETRY_DELAYS = [1000, 2000, 4000];
-    const ALL_PERMS = ['download', 'dashboard', 'audit', 'users', 'groups'];
+    const ALL_PERMS = ['download', 'audit', 'users'];
     const ALL_ACTIONS = [
-        'login_success', 'login_failed', 'logout', 'info_check',
+        'login_success', 'login_failed', 'login_locked', 'logout', 'info_check',
         'download_success', 'download_error',
         'user_created', 'user_updated', 'user_deleted',
-        'group_created', 'group_updated', 'group_deleted'
+        'group_created', 'group_updated', 'group_deleted',
+        'ldap_updated'
     ];
 
     function trackEvent(action, detail) {
@@ -34,10 +35,8 @@
         userMenu: document.getElementById('userMenu'),
         userName: document.getElementById('userName'),
         downloadView: document.getElementById('downloadView'),
-        adminView: document.getElementById('adminView'),
-        auditView: document.getElementById('auditView'),
+        logsView: document.getElementById('logsView'),
         usersView: document.getElementById('usersView'),
-        groupsView: document.getElementById('groupsView'),
         metricActive: document.getElementById('metricActive'),
         metricCompleted: document.getElementById('metricCompleted'),
         metricFailed: document.getElementById('metricFailed'),
@@ -103,7 +102,9 @@
         progressStatus: document.getElementById('progressStatus'),
         downloadError: document.getElementById('downloadError'),
         recentSection: document.getElementById('recentSection'),
-        recentBody: document.getElementById('recentBody')
+        recentBody: document.getElementById('recentBody'),
+        bruteForceConfig: document.getElementById('bruteForceConfig'),
+        bruteForceBody: document.getElementById('bruteForceBody')
     };
 
     let currentUser = null;
@@ -182,8 +183,11 @@
 
         setInterval(() => {
             if (!currentUser) return;
-            if (!elements.adminView.hidden) loadMetrics();
-            if (!elements.auditView.hidden) loadAuditData();
+            if (!elements.logsView.hidden) {
+                loadMetrics();
+                loadAuditData();
+                loadBruteForce();
+            }
         }, 5000);
 
         checkAuth();
@@ -263,21 +267,24 @@
         showLogin();
     }
 
-    const VIEW_PERMS = { dashboard: 'dashboard', audit: 'audit', users: 'users', groups: 'groups' };
+    const VIEW_PERMS = { logs: 'audit', users: 'users' };
 
     function switchTab(name) {
         if (VIEW_PERMS[name] && !can(VIEW_PERMS[name])) name = 'download';
         elements.downloadView.hidden = name !== 'download';
-        elements.adminView.hidden = name !== 'dashboard';
-        elements.auditView.hidden = name !== 'audit';
+        elements.logsView.hidden = name !== 'logs';
         elements.usersView.hidden = name !== 'users';
-        elements.groupsView.hidden = name !== 'groups';
         elements.container.classList.toggle('wide', name !== 'download');
         if (name === 'download') loadRecent();
-        if (name === 'dashboard') loadMetrics();
-        if (name === 'audit') loadAuditData();
-        if (name === 'users') loadUsersData();
-        if (name === 'groups') loadGroupsData();
+        if (name === 'logs') {
+            loadMetrics();
+            loadAuditData();
+            loadBruteForce();
+        }
+        if (name === 'users') {
+            loadUsersData();
+            loadGroupsData();
+        }
     }
 
     async function loadRecent() {
@@ -621,6 +628,75 @@
         } catch {}
     }
 
+    async function loadBruteForce() {
+        try {
+            const res = await fetch(`${API_BASE}/admin/bruteforce`);
+            if (!res.ok) return;
+            const state = await res.json();
+            const cfg = state.config || {};
+            elements.bruteForceConfig.innerHTML = `
+                <div class="bf-field"><label>Max Attempts</label><input type="number" id="bfMaxAttempts" value="${cfg.max_attempts || 5}" min="1"></div>
+                <div class="bf-field"><label>Window (min)</label><input type="number" id="bfWindow" value="${cfg.window_minutes || 15}" min="1"></div>
+                <div class="bf-field"><label>Backoff Base (min)</label><input type="number" id="bfBackoffBase" value="${cfg.backoff_base_minutes || 1}" min="1"></div>
+                <div class="bf-field"><label>Backoff Max (min)</label><input type="number" id="bfBackoffMax" value="${cfg.backoff_max_minutes || 64}" min="1"></div>
+                <div class="bf-actions">
+                    <button class="btn btn-primary btn-small" onclick="saveBruteForceConfig()">Save</button>
+                    <button class="btn btn-danger btn-small" onclick="resetBruteForceAll()">Unlock All</button>
+                </div>
+            `;
+            const locks = state.locks || [];
+            elements.bruteForceBody.textContent = '';
+            if (!locks.length) {
+                emptyRow(elements.bruteForceBody, 5, 'No active lockouts.');
+                return;
+            }
+            for (const lock of locks) {
+                const tr = document.createElement('tr');
+                const until = new Date(lock.lockout_until);
+                const now = new Date();
+                const remaining = until > now ? Math.ceil((until - now) / 60000) + 'm' : 'expired';
+                tr.innerHTML = `
+                    <td><span class="lock-type-${lock.type}">${lock.type}</span></td>
+                    <td>${escapeHtml(lock.key)}</td>
+                    <td>${lock.failures}</td>
+                    <td>${until.toLocaleString()} (${remaining})</td>
+                    <td class="action-cell">
+                        <button class="btn btn-danger btn-small" onclick="resetBruteForceItem('${lock.type}','${escapeHtml(lock.key)}')">Unlock</button>
+                    </td>
+                `;
+                elements.bruteForceBody.appendChild(tr);
+            }
+        } catch {}
+    }
+
+    window.saveBruteForceConfig = async function() {
+        const cfg = {
+            max_attempts: parseInt(document.getElementById('bfMaxAttempts')?.value) || 5,
+            window_minutes: parseInt(document.getElementById('bfWindow')?.value) || 15,
+            backoff_base_minutes: parseInt(document.getElementById('bfBackoffBase')?.value) || 1,
+            backoff_max_minutes: parseInt(document.getElementById('bfBackoffMax')?.value) || 64
+        };
+        await fetch(`${API_BASE}/admin/bruteforce/config`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg)
+        });
+        loadBruteForce();
+    };
+
+    window.resetBruteForceAll = async function() {
+        await fetch(`${API_BASE}/admin/bruteforce/reset`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ all: true })
+        });
+        loadBruteForce();
+    };
+
+    window.resetBruteForceItem = async function(type, key) {
+        const body = type === 'ip' ? { ip: key } : { username: key };
+        await fetch(`${API_BASE}/admin/bruteforce/reset`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+        });
+        loadBruteForce();
+    };
+
     async function loadAuditData() {
         const params = new URLSearchParams();
         if (elements.filterAction.value) params.set('action', elements.filterAction.value);
@@ -680,7 +756,6 @@
 
         currentUrl = url;
         currentPassword = null;
-        trackEvent('info_check', url);
 
         setLoading(elements.checkBtn, true);
         hideError(elements.urlError);
@@ -777,7 +852,6 @@
         if (!currentFileInfo) return;
 
         abortController = new AbortController();
-        trackEvent('download_start', currentFileInfo?.url || 'unknown');
         
         setLoading(elements.downloadBtn, true);
         elements.downloadBtn.disabled = true;

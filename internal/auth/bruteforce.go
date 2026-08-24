@@ -118,6 +118,95 @@ func (b *Bruteforce) Reset(ip, username string) {
 	delete(b.byUser, username)
 }
 
+type LockInfo struct {
+	Key           string    `json:"key"`
+	Type          string    `json:"type"`
+	Failures      int       `json:"failures"`
+	LockoutUntil  time.Time `json:"lockout_until"`
+	BackoffStep   int       `json:"backoff_step"`
+}
+
+type BruteforceState struct {
+	Config config.LoginRateConfig `json:"config"`
+	Locks  []LockInfo             `json:"locks"`
+}
+
+// GetState returns current config and active locks for the admin UI.
+func (b *Bruteforce) GetState() BruteforceState {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	now := time.Now()
+	var locks []LockInfo
+
+	for k, t := range b.byIP {
+		b.clean(t, now)
+		if t.failures > 0 {
+			locks = append(locks, LockInfo{
+				Key:          k,
+				Type:         "ip",
+				Failures:     t.failures,
+				LockoutUntil: t.lockoutUntil,
+				BackoffStep:  t.backoffStep,
+			})
+		}
+	}
+	for k, t := range b.byUser {
+		b.clean(t, now)
+		if t.failures > 0 {
+			locks = append(locks, LockInfo{
+				Key:          k,
+				Type:         "username",
+				Failures:     t.failures,
+				LockoutUntil: t.lockoutUntil,
+				BackoffStep:  t.backoffStep,
+			})
+		}
+	}
+
+	return BruteforceState{Config: b.cfg, Locks: locks}
+}
+
+// UpdateConfig updates the brute-force settings at runtime.
+func (b *Bruteforce) UpdateConfig(cfg config.LoginRateConfig) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if cfg.MaxAttempts > 0 {
+		b.cfg.MaxAttempts = cfg.MaxAttempts
+	}
+	if cfg.WindowMinutes > 0 {
+		b.cfg.WindowMinutes = cfg.WindowMinutes
+	}
+	if cfg.BackoffBase > 0 {
+		b.cfg.BackoffBase = cfg.BackoffBase
+	}
+	if cfg.BackoffMaxMinutes > 0 {
+		b.cfg.BackoffMaxMinutes = cfg.BackoffMaxMinutes
+	}
+}
+
+// ResetByIP clears all lockout state for an IP.
+func (b *Bruteforce) ResetByIP(ip string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.byIP, ip)
+}
+
+// ResetByUsername clears all lockout state for a username.
+func (b *Bruteforce) ResetByUsername(username string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.byUser, username)
+}
+
+// ResetAll clears all lockout state.
+func (b *Bruteforce) ResetAll() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.byIP = make(map[string]*attemptTracker)
+	b.byUser = make(map[string]*attemptTracker)
+}
+
 func (b *Bruteforce) getOrCreate(m map[string]*attemptTracker, key string, now time.Time) *attemptTracker {
 	t, ok := m[key]
 	if !ok {

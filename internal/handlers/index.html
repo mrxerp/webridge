@@ -45,10 +45,8 @@
                         </button>
                         <div id="userMenu" class="dropdown-menu" hidden>
                             <button class="menu-item" type="button" data-view="download">Download</button>
-                            <button class="menu-item" type="button" data-view="dashboard" data-perm="dashboard">Dashboard</button>
-                            <button class="menu-item" type="button" data-view="audit" data-perm="audit">Audit Log</button>
+                            <button class="menu-item" type="button" data-view="logs" data-perm="audit">Logs</button>
                             <button class="menu-item" type="button" data-view="users" data-perm="users">Users</button>
-                            <button class="menu-item" type="button" data-view="groups" data-perm="groups">Groups</button>
                             <div class="menu-divider"></div>
                             <button id="logoutBtn" class="menu-item" type="button">Logout</button>
                         </div>
@@ -169,7 +167,7 @@
                     </section>
                 </div>
 
-                <div id="adminView" hidden>
+                <div id="logsView" hidden>
                     <section class="admin-section">
                         <h2 class="section-title">Dashboard</h2>
                         <div class="metrics-grid">
@@ -199,9 +197,7 @@
                             </div>
                         </div>
                     </section>
-                </div>
 
-                <div id="auditView" hidden>
                     <section class="admin-section">
                         <h2 class="section-title">Audit Log</h2>
                         <form id="auditFilterForm" class="inline-form">
@@ -232,32 +228,32 @@
                             </table>
                         </div>
                     </section>
+
+                    <section class="admin-section">
+                        <h2 class="section-title">Login Security</h2>
+                        <div id="bruteForceConfig" class="brute-force-config"></div>
+                        <h3 class="section-subtitle">Active Lockouts</h3>
+                        <div class="table-wrap">
+                            <table class="audit-table">
+                                <thead>
+                                    <tr>
+                                        <th>Type</th>
+                                        <th>Key</th>
+                                        <th>Failures</th>
+                                        <th>Locked Until</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="bruteForceBody">
+                                    <tr><td colspan="5" class="empty-row">No active lockouts.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
                 </div>
                 <div id="usersView" hidden>
                     <section class="admin-section">
                         <h2 class="section-title">Local Users</h2>
-                        <h2 class="section-title">LDAP / SSO</h2>
-                        <form id="ldapForm" class="ldap-card ldap-form" hidden autocomplete="off">
-                            <label class="ldap-check"><input type="checkbox" id="ldapEnabled"> Enabled</label>
-                            <div class="ldap-grid">
-                                <input type="text" id="ldapHost" placeholder="Host, e.g. ad.example.com">
-                                <input type="number" id="ldapPort" placeholder="Port (389/636)">
-                                <input type="text" id="ldapBindDN" placeholder="Bind DN (empty = anonymous search)">
-                                <input type="password" id="ldapBindPassword" placeholder="Bind password (blank = unchanged)">
-                                <input type="text" id="ldapBaseDN" placeholder="Base DN, e.g. ou=people,dc=example,dc=com" class="ldap-wide">
-                                <input type="text" id="ldapFilter" placeholder='User filter, e.g. (uid=%s) or (sAMAccountName=%s)'>
-                                <input type="text" id="ldapGroups" placeholder="Default groups for new LDAP users (comma-separated)">
-                            </div>
-                            <div class="ldap-check">
-                                <label><input type="checkbox" id="ldapStartTLS"> StartTLS (plain port upgraded to TLS)</label>
-                                <label><input type="checkbox" id="ldapInsecure"> Skip TLS certificate verification</label>
-                            </div>
-                            <p id="ldapError" class="error-message" hidden></p>
-                            <button class="btn btn-primary btn-small" type="submit">
-                                <span class="btn-text">Save LDAP Settings</span>
-                                <span class="btn-loader" hidden></span>
-                            </button>
-                        </form>
                         <form id="addUserForm" class="inline-form">
                             <input type="text" id="newUsername" placeholder="Username" autocomplete="off" required>
                             <input type="password" id="newPassword" placeholder="Password" autocomplete="new-password" required>
@@ -286,11 +282,9 @@
                             </table>
                         </div>
                     </section>
-                </div>
 
-                <div id="groupsView" hidden>
                     <section class="admin-section">
-                        <h2 class="section-title">Global Groups</h2>
+                        <h2 class="section-title">Groups</h2>
                         <p class="hint">Permissions: <code>download</code> use the downloader &middot; <code>dashboard</code> metrics &middot; <code>audit</code> audit log &middot; <code>users</code> manage users &amp; LDAP &middot; <code>groups</code> manage groups. Full access = the admin <em>role</em>, set per user.</p>
                         <form id="addGroupForm" class="inline-form">
                             <input type="text" id="newGroupName" placeholder="Group name" autocomplete="off" required>
@@ -313,6 +307,31 @@
                                 <tbody id="groupsBody"></tbody>
                             </table>
                         </div>
+                    </section>
+
+                    <section class="admin-section">
+                        <h2 class="section-title">LDAP / SSO</h2>
+                        <form id="ldapForm" class="ldap-card ldap-form" hidden autocomplete="off">
+                            <label class="ldap-check"><input type="checkbox" id="ldapEnabled"> Enabled</label>
+                            <div class="ldap-grid">
+                                <input type="text" id="ldapHost" placeholder="Host, e.g. ad.example.com">
+                                <input type="number" id="ldapPort" placeholder="Port (389/636)">
+                                <input type="text" id="ldapBindDN" placeholder="Bind DN (empty = anonymous search)">
+                                <input type="password" id="ldapBindPassword" placeholder="Bind password (blank = unchanged)">
+                                <input type="text" id="ldapBaseDN" placeholder="Base DN, e.g. ou=people,dc=example,dc=com" class="ldap-wide">
+                                <input type="text" id="ldapFilter" placeholder='User filter, e.g. (uid=%s) or (sAMAccountName=%s)'>
+                                <input type="text" id="ldapGroups" placeholder="Default groups for new LDAP users (comma-separated)">
+                            </div>
+                            <div class="ldap-check">
+                                <label><input type="checkbox" id="ldapStartTLS"> StartTLS (plain port upgraded to TLS)</label>
+                                <label><input type="checkbox" id="ldapInsecure"> Skip TLS certificate verification</label>
+                            </div>
+                            <p id="ldapError" class="error-message" hidden></p>
+                            <button class="btn btn-primary btn-small" type="submit">
+                                <span class="btn-text">Save LDAP Settings</span>
+                                <span class="btn-loader" hidden></span>
+                            </button>
+                        </form>
                     </section>
                 </div>
 

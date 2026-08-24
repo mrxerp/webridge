@@ -3,3 +3,4 @@ bin/
 .env
 ldap-settings.json
 deploy/docker/config.yaml
+data/
