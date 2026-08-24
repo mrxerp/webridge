@@ -850,8 +850,8 @@
         const params = new URLSearchParams();
         if (elements.filterAction.value) params.set('action', elements.filterAction.value);
         if (elements.filterUser.value.trim()) params.set('user', elements.filterUser.value.trim());
-        if (elements.filterFrom.value) params.set('from', String(new Date(elements.filterFrom.value).getTime()));
-        if (elements.filterTo.value) params.set('to', String(new Date(elements.filterTo.value).getTime()));
+        if (elements.filterFrom.value) params.set('from', String(new Date(elements.filterFrom.value + 'T00:00').getTime()));
+        if (elements.filterTo.value) params.set('to', String(new Date(elements.filterTo.value + 'T23:59:59.999').getTime()));
         if (elements.exportCsvBtn) elements.exportCsvBtn.href = `${API_BASE}/admin/audit/export?${params}`;
         return params;
     }

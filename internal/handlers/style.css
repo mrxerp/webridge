@@ -1,4 +1,5 @@
 :root {
+    color-scheme: dark;
     --color-bg: #0a0a0f;
     --color-surface: #1a1a24;
     --color-surface-hover: #22223a;
@@ -694,7 +695,7 @@ footer a:hover {
 
 .inline-form input[type="text"],
 .inline-form input[type="password"],
-.inline-form input[type="datetime-local"],
+.inline-form input[type="date"],
 .inline-form select {
     padding: 10px 14px;
     background: rgba(255, 255, 255, 0.03);
