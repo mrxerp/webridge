@@ -38,11 +38,26 @@ func (d Duration) String() string { return time.Duration(d).String() }
 type Config struct {
 	Server     ServerConfig     `yaml:"server"`
 	WeTransfer WeTransferConfig `yaml:"wetransfer"`
+	Audit      AuditConfig      `yaml:"audit"`
 	Limits     LimitsConfig     `yaml:"limits"`
 	Logging    LoggingConfig    `yaml:"logging"`
 	UI         UIConfig         `yaml:"ui"`
 	Auth       AuthConfig       `yaml:"auth"`
 	LDAP       LDAPConfig       `yaml:"ldap"`
+}
+
+type AuditConfig struct {
+	DBPath              string `yaml:"db_path"`
+	RetentionDays       int    `yaml:"retention_days"`
+	AccessLogDir        string `yaml:"access_log_dir"`
+	AccessLogRetention  int    `yaml:"access_log_retention_days"`
+	HashDownloads       bool   `yaml:"hash_downloads"`
+	MaxHashSizeMB       int    `yaml:"max_hash_size_mb"`
+	OffHoursStart       int    `yaml:"off_hours_start"`
+	OffHoursEnd         int    `yaml:"off_hours_end"`
+	BulkDownloadCount   int    `yaml:"bulk_download_count"`
+	BulkDownloadWindow  int    `yaml:"bulk_download_window_minutes"`
+	MaxFileSizeGB       int    `yaml:"anomaly_max_file_size_gb"`
 }
 
 type AuthConfig struct {
@@ -135,6 +150,19 @@ func defaults() Config {
 		Limits:  LimitsConfig{MaxConcurrentDownloads: 50, MaxFileSizeGB: 2, RateLimitPerMinute: 30},
 		Logging: LoggingConfig{Level: "info", Format: "json"},
 		UI:      UIConfig{Enabled: true, Title: "File Download Portal", MaxURLLength: 2048},
+		Audit: AuditConfig{
+			DBPath:              "data/audit.db",
+			RetentionDays:       90,
+			AccessLogDir:        "data/logs",
+			AccessLogRetention:  7,
+			HashDownloads:       true,
+			MaxHashSizeMB:       500,
+			OffHoursStart:       22,
+			OffHoursEnd:         6,
+			BulkDownloadCount:   10,
+			BulkDownloadWindow:  5,
+			MaxFileSizeGB:       10,
+		},
 		Auth: AuthConfig{
 			SessionTTL: Duration(24 * time.Hour),
 			Users: []UserConfig{
@@ -157,6 +185,13 @@ func applyEnv(c *Config) {
 	setStr(&c.WeTransfer.UserAgent, "PROXY_WETRANSFER_USER_AGENT")
 	setDur((*time.Duration)(&c.WeTransfer.RequestTimeout), "PROXY_WETRANSFER_REQUEST_TIMEOUT")
 	setInt(&c.WeTransfer.MaxRedirects, "PROXY_WETRANSFER_MAX_REDIRECTS")
+
+	setStr(&c.Audit.DBPath, "PROXY_AUDIT_DB_PATH")
+	setInt(&c.Audit.RetentionDays, "PROXY_AUDIT_RETENTION_DAYS")
+	setStr(&c.Audit.AccessLogDir, "PROXY_AUDIT_ACCESS_LOG_DIR")
+	setInt(&c.Audit.AccessLogRetention, "PROXY_AUDIT_ACCESS_LOG_RETENTION")
+	setBool(&c.Audit.HashDownloads, "PROXY_AUDIT_HASH_DOWNLOADS")
+	setInt(&c.Audit.MaxHashSizeMB, "PROXY_AUDIT_MAX_HASH_SIZE_MB")
 
 	setInt(&c.Limits.MaxConcurrentDownloads, "PROXY_LIMITS_MAX_CONCURRENT_DOWNLOADS")
 	setInt(&c.Limits.MaxFileSizeGB, "PROXY_LIMITS_MAX_FILE_SIZE_GB")

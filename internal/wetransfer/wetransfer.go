@@ -255,7 +255,7 @@ func (c *Client) getDirectLink(ctx context.Context, transferID, recipientID, sec
 	return result.DirectLink, fileName, fileSize, files, nil
 }
 
-func (c *Client) Stream(ctx context.Context, info *TransferInfo, w http.ResponseWriter) error {
+func (c *Client) Stream(ctx context.Context, info *TransferInfo, w http.ResponseWriter) (int64, error) {
 	const maxRetries = 3
 	const baseBackoff = 2 * time.Second
 	buf := make([]byte, 32*1024)
@@ -263,18 +263,18 @@ func (c *Client) Stream(ctx context.Context, info *TransferInfo, w http.Response
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, "GET", info.DirectURL, nil)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		req.Header.Set("User-Agent", c.userAgent)
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
 			if attempt == maxRetries {
-				return fmt.Errorf("upstream failed after %d retries: %w", maxRetries, err)
+				return 0, fmt.Errorf("upstream failed after %d retries: %w", maxRetries, err)
 			}
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return 0, ctx.Err()
 			case <-time.After(baseBackoff * time.Duration(attempt+1)):
 			}
 			continue
@@ -289,26 +289,18 @@ func (c *Client) Stream(ctx context.Context, info *TransferInfo, w http.Response
 		}
 		w.WriteHeader(resp.StatusCode)
 
-		_, err = io.CopyBuffer(w, resp.Body, buf)
+		n, err := io.CopyBuffer(w, resp.Body, buf)
 		resp.Body.Close()
 
 		if err != nil {
 			if errors.Is(err, context.Canceled) || isClosedConnection(err) {
-				return nil
+				return n, nil
 			}
-			if attempt == maxRetries {
-				return err
-			}
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(baseBackoff * time.Duration(attempt+1)):
-			}
-			continue
+			return n, err
 		}
-		return nil
+		return n, nil
 	}
-	return nil
+	return 0, nil
 }
 
 func extractFileName(directURL string) string {

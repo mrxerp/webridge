@@ -12,6 +12,15 @@
         'group_created', 'group_updated', 'group_deleted'
     ];
 
+    function trackEvent(action, detail) {
+        fetch(API_BASE + '/audit/log', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action, detail }),
+            credentials: 'same-origin'
+        }).catch(() => {});
+    }
+
     const elements = {
         container: document.getElementById('container'),
         loginSection: document.getElementById('loginSection'),
@@ -39,6 +48,7 @@
         refreshAuditBtn: document.getElementById('refreshAuditBtn'),
         logoutBtn: document.getElementById('logoutBtn'),
         auditFilterForm: document.getElementById('auditFilterForm'),
+        exportCsvBtn: document.getElementById('exportCsvBtn'),
         filterAction: document.getElementById('filterAction'),
         filterUser: document.getElementById('filterUser'),
         filterFrom: document.getElementById('filterFrom'),
@@ -84,6 +94,7 @@
         providerBadge: document.getElementById('providerBadge'),
         downloadBtn: document.getElementById('downloadBtn'),
         retryBtn: document.getElementById('retryBtn'),
+        cancelBtn: document.getElementById('cancelBtn'),
         progressSection: document.getElementById('progressSection'),
         progressFill: document.getElementById('progressFill'),
         progressPercent: document.getElementById('progressPercent'),
@@ -160,6 +171,14 @@
         elements.passwordBtn.addEventListener('click', onPasswordSubmit);
         elements.downloadBtn.addEventListener('click', onDownloadClick);
         elements.retryBtn.addEventListener('click', onRetryClick);
+        elements.cancelBtn.addEventListener('click', () => {
+            if (abortController) {
+                trackEvent('download_cancel', 'user_cancelled');
+                abortController.abort();
+                elements.cancelBtn.style.display = 'none';
+                elements.progressStatus.textContent = 'Download cancelled.';
+            }
+        });
 
         setInterval(() => {
             if (!currentUser) return;
@@ -248,6 +267,7 @@
 
     function switchTab(name) {
         if (VIEW_PERMS[name] && !can(VIEW_PERMS[name])) name = 'download';
+        trackEvent('view_' + name, name);
         elements.downloadView.hidden = name !== 'download';
         elements.adminView.hidden = name !== 'dashboard';
         elements.auditView.hidden = name !== 'audit';
@@ -609,6 +629,12 @@
         if (elements.filterFrom.value) params.set('from', String(new Date(elements.filterFrom.value).getTime()));
         if (elements.filterTo.value) params.set('to', String(new Date(elements.filterTo.value).getTime()));
         params.set('limit', '500');
+        const exportParams = new URLSearchParams();
+        if (elements.filterAction.value) exportParams.set('action', elements.filterAction.value);
+        if (elements.filterUser.value.trim()) exportParams.set('user', elements.filterUser.value.trim());
+        if (elements.filterFrom.value) exportParams.set('from', String(new Date(elements.filterFrom.value).getTime()));
+        if (elements.filterTo.value) exportParams.set('to', String(new Date(elements.filterTo.value).getTime()));
+        if (elements.exportCsvBtn) elements.exportCsvBtn.href = `${API_BASE}/admin/audit/export?${exportParams}`;
         try {
             const res = await fetch(`${API_BASE}/admin/audit?${params}`);
             if (!res.ok) return;
@@ -655,6 +681,7 @@
 
         currentUrl = url;
         currentPassword = null;
+        trackEvent('info_check', url);
 
         setLoading(elements.checkBtn, true);
         hideError(elements.urlError);
@@ -751,10 +778,12 @@
         if (!currentFileInfo) return;
 
         abortController = new AbortController();
+        trackEvent('download_start', currentFileInfo?.url || 'unknown');
         
         setLoading(elements.downloadBtn, true);
         elements.downloadBtn.disabled = true;
         elements.retryBtn.hidden = true;
+        elements.cancelBtn.style.display = '';
         hideError(elements.downloadError);
         showProgress();
 
@@ -769,6 +798,7 @@
         } finally {
             setLoading(elements.downloadBtn, false);
             elements.downloadBtn.disabled = false;
+            elements.cancelBtn.style.display = 'none';
             loadRecent();
         }
     }

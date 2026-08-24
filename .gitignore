@@ -2,3 +2,4 @@ bin/
 *.log
 .env
 ldap-settings.json
+deploy/docker/config.yaml

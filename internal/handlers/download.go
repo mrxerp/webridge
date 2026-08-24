@@ -1,7 +1,10 @@
 package handlers
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"hash"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -93,14 +96,14 @@ func (h *DownloadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.audit.StartDownload()
 
 	if !h.wt.Matches(urlParam) {
-		h.logDownload(username, clientIP, urlParam, "", 0, 0, time.Since(start), "error", "unsupported provider")
+		h.logDownload(username, clientIP, urlParam, "", 0, 0, time.Since(start), "error", "unsupported provider", "")
 		http.Error(w, "Unsupported URL. Only WeTransfer links are supported.", http.StatusBadRequest)
 		return
 	}
 
 	info, err := h.wt.Resolve(ctx, urlParam, passwordAuth(r))
 	if err != nil {
-		h.logDownload(username, clientIP, urlParam, "", 0, 0, time.Since(start), "error", err.Error())
+		h.logDownload(username, clientIP, urlParam, "", 0, 0, time.Since(start), "error", err.Error(), "")
 		var pwErr *wetransfer.PasswordRequiredError
 		if errors.As(err, &pwErr) {
 			w.Header().Set("Content-Type", "application/json")
@@ -122,7 +125,7 @@ func (h *DownloadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if info.FileSize > 0 {
 		maxSize := int64(h.cfg.Limits.MaxFileSizeGB) * 1024 * 1024 * 1024
 		if info.FileSize > maxSize {
-			h.logDownload(username, clientIP, urlParam, info.FileName, info.FileSize, 0, time.Since(start), "error", "file too large")
+			h.logDownload(username, clientIP, urlParam, info.FileName, info.FileSize, 0, time.Since(start), "error", "file too large", "")
 			http.Error(w, "File size exceeds limit", http.StatusRequestEntityTooLarge)
 			return
 		}
@@ -132,18 +135,27 @@ func (h *DownloadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Accept-Ranges", "bytes")
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 
-	if err := h.wt.Stream(ctx, info, w); err != nil {
+	var hashHex string
+	streamW := w
+	if h.cfg.Audit.HashDownloads && info.FileSize > 0 && info.FileSize <= int64(h.cfg.Audit.MaxHashSizeMB)*1024*1024 {
+		hw := &hashWriter{ResponseWriter: w, h: sha256.New()}
+		streamW = hw
+		defer func() { hashHex = hw.hex() }()
+	}
+
+	bytesWritten, err := h.wt.Stream(ctx, info, streamW)
+	if err != nil {
 		if !isClientDisconnect(err) {
 			h.logger.Error("stream error", "error", err, "url", urlParam)
 		}
-		h.logDownload(username, clientIP, urlParam, info.FileName, info.FileSize, 0, time.Since(start), "error", err.Error())
+		h.logDownload(username, clientIP, urlParam, info.FileName, info.FileSize, bytesWritten, time.Since(start), "error", err.Error(), hashHex)
 		return
 	}
 
-	h.logDownload(username, clientIP, urlParam, info.FileName, info.FileSize, info.FileSize, time.Since(start), "success", "")
+	h.logDownload(username, clientIP, urlParam, info.FileName, info.FileSize, bytesWritten, time.Since(start), "success", "", hashHex)
 }
 
-func (h *DownloadHandler) logDownload(username, clientIP, url, filename string, size, bytes int64, duration time.Duration, status, errMsg string) {
+func (h *DownloadHandler) logDownload(username, clientIP, url, filename string, size, bytes int64, duration time.Duration, status, errMsg, sha256 string) {
 	h.logger.Info("download",
 		"user", username,
 		"ip", clientIP,
@@ -161,12 +173,15 @@ func (h *DownloadHandler) logDownload(username, clientIP, url, filename string, 
 	}
 	h.audit.EndDownload(status == "success", bytes)
 	h.audit.AddEvent(audit.Event{
-		Time:   time.Now(),
-		Action: "download_" + status,
-		User:   username,
-		IP:     clientIP,
-		Detail: detail,
-		URL:    url,
+		Time:             time.Now(),
+		Action:           "download_" + status,
+		User:             username,
+		IP:               clientIP,
+		Detail:           detail,
+		URL:              url,
+		BytesTransferred: bytes,
+		DurationMS:       duration.Milliseconds(),
+		SHA256:           sha256,
 	})
 }
 
@@ -257,4 +272,21 @@ func (h *DownloadHandler) InfoHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	audit.WriteJSON(w, resp)
+}
+
+type hashWriter struct {
+	http.ResponseWriter
+	h hash.Hash
+	n int64
+}
+
+func (hw *hashWriter) Write(p []byte) (int, error) {
+	n, err := hw.ResponseWriter.Write(p)
+	hw.h.Write(p[:n])
+	hw.n += int64(n)
+	return n, err
+}
+
+func (hw *hashWriter) hex() string {
+	return hex.EncodeToString(hw.h.Sum(nil))
 }

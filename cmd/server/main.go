@@ -35,7 +35,26 @@ func main() {
 	wtClient := wetransfer.NewClient(time.Duration(cfg.WeTransfer.RequestTimeout), cfg.WeTransfer.MaxRedirects)
 
 	rateLimiter := appmiddleware.NewRateLimiter(cfg.Limits.RateLimitPerMinute)
-	auditLog := audit.New(5000)
+
+	var auditStore *audit.Store
+	auditStore, err = audit.OpenStore(cfg.Audit.DBPath, logger)
+	if err != nil {
+		logger.Warn("audit store unavailable, using in-memory", "error", err)
+	}
+	if auditStore != nil {
+		defer auditStore.Close()
+		auditStore.Purge(cfg.Audit.RetentionDays)
+		logger.Info("audit store ready", "db", cfg.Audit.DBPath, "retention_days", cfg.Audit.RetentionDays)
+	}
+
+	auditLog := audit.NewWithStore(5000, auditStore)
+	auditLog.SetAnomalyConfig(audit.AnomalyConfig{
+		OffHoursStart:      cfg.Audit.OffHoursStart,
+		OffHoursEnd:        cfg.Audit.OffHoursEnd,
+		BulkDownloadCount:  cfg.Audit.BulkDownloadCount,
+		BulkDownloadWindow: cfg.Audit.BulkDownloadWindow,
+		MaxFileSizeGB:      cfg.Audit.MaxFileSizeGB,
+	})
 	ldapFile := os.Getenv("LDAP_SETTINGS_FILE")
 	if ldapFile == "" {
 		ldapFile = filepath.Join(filepath.Dir(*configPath), "ldap-settings.json")
@@ -64,6 +83,8 @@ func main() {
 
 	mux.Handle("GET /api/v1/admin/metrics", guard("dashboard", http.HandlerFunc(auditLog.MetricsHandler)))
 	mux.Handle("GET /api/v1/admin/audit", guard("audit", http.HandlerFunc(auditLog.EventsHandler)))
+	mux.Handle("GET /api/v1/admin/audit/export", guard("audit", http.HandlerFunc(auditLog.ExportCSVHandler)))
+	mux.Handle("POST /api/v1/audit/log", authSvc.RequireAuth(http.HandlerFunc(auditLog.LogClientEvent)))
 
 	mux.Handle("GET /api/v1/admin/users", guard("users", http.HandlerFunc(authSvc.ListUsers)))
 	mux.Handle("GET /api/v1/admin/ldap", guard("users", http.HandlerFunc(authSvc.LDAPStatus)))
@@ -81,6 +102,7 @@ func main() {
 
 	var handler http.Handler = mux
 	for _, mw := range []func(http.Handler) http.Handler{
+		appmiddleware.AccessLog(cfg.Audit.AccessLogDir, logger),
 		appmiddleware.Logging(logger),
 		appmiddleware.SecurityHeaders,
 		appmiddleware.ValidateURL,

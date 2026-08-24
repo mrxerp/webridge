@@ -139,6 +139,13 @@
                                 <span id="progressEta">&mdash;</span>
                             </div>
                             <p id="progressStatus" class="progress-status">Preparing download...</p>
+                            <button id="cancelBtn" class="btn btn-danger" style="display:none;margin-top:8px">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                                </svg>
+                                <span>Cancel</span>
+                            </button>
                         </div>
 
                         <p id="downloadError" class="error-message" hidden></p>
@@ -206,6 +213,7 @@
                             <label class="filter-label">To <input type="datetime-local" id="filterTo"></label>
                             <button class="btn btn-primary btn-small" type="submit">Apply</button>
                             <button id="clearFiltersBtn" class="btn btn-secondary btn-small" type="button">Clear</button>
+                            <a id="exportCsvBtn" class="btn btn-secondary btn-small" href="/api/v1/admin/audit/export" target="_blank">Export CSV</a>
                         </form>
                         <div class="table-wrap">
                             <table class="audit-table">
