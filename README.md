@@ -21,12 +21,15 @@ A self-hosted, all-round file downloader portal. Paste a link from any supported
 ### Docker (Recommended)
 
 ```bash
-docker compose -f deploy/docker/docker-compose.yml up -d
+cp configs/config.yaml.example config.yaml    # optional; sane defaults apply without it
+docker compose -f deploy/docker/compose.yaml up -d
 
 # Or manually
 docker build -t webridge -f deploy/docker/Dockerfile .
 docker run -p 8080:8080 -v $(pwd)/config.yaml:/app/config.yaml webridge
 ```
+
+Compose mounts `./config.yaml` from your current directory (read-only) and persists UI-edited LDAP settings in `./data/`. See [Configuration](#configuration) below — `PROXY_*` env vars override the file. Users, groups and LDAP can also be managed live in the admin UI.
 
 Default login: `admin` / `admin123` — change it immediately.
 
@@ -34,7 +37,7 @@ Default login: `admin` / `admin123` — change it immediately.
 
 ```bash
 make build
-./bin/proxy-downloader -config configs/config.yaml.example
+./bin/webridge -config configs/config.yaml.example
 ```
 
 ## Configuration

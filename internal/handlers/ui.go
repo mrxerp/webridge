@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"proxy-downloader/internal/config"
+	"webridge/internal/config"
 )
 
 //go:embed index.html app.js style.css

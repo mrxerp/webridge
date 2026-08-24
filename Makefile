@@ -1,6 +1,6 @@
 .PHONY: build run test docker-build docker-run docker-stop clean lint fmt vet
 
-BINARY_NAME := proxy-downloader
+BINARY_NAME := webridge
 BUILD_DIR := ./bin
 LDFLAGS := -ldflags "-s -w"
 
@@ -15,16 +15,16 @@ test:
 	go test -v -race -count=1 ./...
 
 docker-build:
-	docker build -t proxy-downloader:latest -f deploy/docker/Dockerfile .
+	docker build -t webridge:latest -f deploy/docker/Dockerfile .
 
 docker-run:
-	docker compose -f deploy/docker/docker-compose.yml up -d
+	docker compose -f deploy/docker/compose.yaml up -d
 
 docker-stop:
-	docker compose -f deploy/docker/docker-compose.yml down
+	docker compose -f deploy/docker/compose.yaml down
 
 docker-logs:
-	docker compose -f deploy/docker/docker-compose.yml logs -f
+	docker compose -f deploy/docker/compose.yaml logs -f
 
 clean:
 	rm -rf $(BUILD_DIR)

@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"proxy-downloader/internal/audit"
-	"proxy-downloader/internal/auth"
-	"proxy-downloader/internal/config"
-	"proxy-downloader/internal/middleware"
-	"proxy-downloader/internal/wetransfer"
+	"webridge/internal/audit"
+	"webridge/internal/auth"
+	"webridge/internal/config"
+	"webridge/internal/middleware"
+	"webridge/internal/wetransfer"
 )
 
 type DownloadHandler struct {
@@ -235,6 +235,7 @@ func (h *DownloadHandler) InfoHandler(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		h.logger.Warn("resolve failed", "url", urlParam, "error", err.Error())
 		if isShortURL {
 			shortURLError(w, err)
 			return
@@ -253,10 +254,6 @@ func (h *DownloadHandler) InfoHandler(w http.ResponseWriter, r *http.Request) {
 		"size_human": audit.FormatBytes(info.FileSize),
 		"file_count": len(info.Files),
 		"files":      info.Files,
-	}
-
-	if info.FileSize > 0 {
-		resp["expires_in"] = "7 days"
 	}
 
 	audit.WriteJSON(w, resp)

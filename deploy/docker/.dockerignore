@@ -3,7 +3,7 @@
 .gitignore
 
 # Build artifacts
-proxy-downloader
+webridge
 *.exe
 
 # Config

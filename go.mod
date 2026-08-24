@@ -1,4 +1,4 @@
-module proxy-downloader
+module webridge
 
 go 1.22
 

@@ -12,12 +12,12 @@ import (
 	"syscall"
 	"time"
 
-	"proxy-downloader/internal/audit"
-	"proxy-downloader/internal/auth"
-	"proxy-downloader/internal/config"
-	"proxy-downloader/internal/handlers"
-	appmiddleware "proxy-downloader/internal/middleware"
-	"proxy-downloader/internal/wetransfer"
+	"webridge/internal/audit"
+	"webridge/internal/auth"
+	"webridge/internal/config"
+	"webridge/internal/handlers"
+	appmiddleware "webridge/internal/middleware"
+	"webridge/internal/wetransfer"
 )
 
 func main() {

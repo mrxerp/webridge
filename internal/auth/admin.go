@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"os"
 
-	"proxy-downloader/internal/audit"
-	"proxy-downloader/internal/config"
-	"proxy-downloader/internal/middleware"
+	"webridge/internal/audit"
+	"webridge/internal/config"
+	"webridge/internal/middleware"
 )
 
 type publicUser struct {
