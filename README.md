@@ -9,8 +9,8 @@ A self-hosted, all-round file downloader portal. Paste a link from any supported
 - **Multi-source by design**: providers self-declare which URLs they handle (`Matches`); the rest of the system never cares where the file came from
 - **Zero-disk streaming**: bytes flow source CDN → your server → user, nothing touches disk
 - **Web UI**: paste URL → click download; per-user Recent list with one-click retry
-- **Accounts & RBAC**: local users or LDAP/AD SSO, groups grant permissions (`download`, `dashboard`, `audit`, `users`, `groups`); admin role = full access
-- **Admin console**: metrics dashboard, live audit log, user/group management, LDAP settings editable in the UI (no restart)
+- **Accounts & RBAC**: local users, LDAP/AD SSO, or org-email (IMAP); groups grant permissions (`download`, `audit`, `users`, `groups`); admin role = full access
+- **Admin console**: download stats, live audit log, user/group management, LDAP + IMAP settings editable in the UI (no restart)
 - **Resilient**: retries, resume via Range headers
 - **Dockerized**: single multi-stage image (~20MB), non-root user
 - **Observable**: JSON logging, health checks, in-app audit trail
