@@ -56,12 +56,14 @@ type Service struct {
 	logger   *slog.Logger
 	ldapCfg  config.LDAPConfig // guarded by mu
 	ldapFile string
+	imapCfg  config.IMAPEmailConfig // guarded by mu
+	imapFile string
 	bf       *Bruteforce
 }
 
 // ponytail: SHA-256+salt instead of bcrypt to avoid a new dep; fine for a small self-hosted tool, swap for golang.org/x/crypto/bcrypt if this ever faces real attackers
-// ldapFile: JSON overrides edited from the admin UI; empty path disables persistence.
-func New(cfg *config.Config, logger *slog.Logger, ldapFile string) *Service {
+// ldapFile/imapFile: JSON overrides edited from the admin UI; empty path disables persistence.
+func New(cfg *config.Config, logger *slog.Logger, ldapFile, imapFile string) *Service {
 	authCfg := cfg.Auth
 	ttl := time.Duration(authCfg.SessionTTL)
 	if ttl <= 0 {
@@ -78,12 +80,20 @@ func New(cfg *config.Config, logger *slog.Logger, ldapFile string) *Service {
 		logger:   logger,
 		ldapCfg:  cfg.LDAP,
 		ldapFile: ldapFile,
+		imapCfg:  cfg.IMAP,
+		imapFile: imapFile,
 		bf:       NewBruteforce(cfg.Auth.LoginRateLimit),
 	}
 	if data, err := os.ReadFile(ldapFile); err == nil {
 		var ov config.LDAPConfig
 		if json.Unmarshal(data, &ov) == nil {
 			s.ldapCfg = ov
+		}
+	}
+	if data, err := os.ReadFile(imapFile); err == nil {
+		var ov config.IMAPEmailConfig
+		if json.Unmarshal(data, &ov) == nil {
+			s.imapCfg = ov
 		}
 	}
 	for _, u := range authCfg.Users {
@@ -188,17 +198,36 @@ func (s *Service) Login(auditLog *audit.Log) http.HandlerFunc {
 		}
 
 		u, exists, ok := s.verify(req.Username, req.Password)
-		viaLDAP := false
+		// External fallbacks apply to unknown users and to users previously
+		// JIT-provisioned from that source (they have no local credential).
+		canFallback := !exists || u.source == "ldap" || u.source == "imap"
+		source := "local"
 		s.mu.Lock()
 		ldapEnabled := s.ldapCfg.Enabled
+		imapEnabled := s.imapCfg.Enabled
 		s.mu.Unlock()
-		if !ok && !exists && ldapEnabled {
+		if !ok && canFallback && ldapEnabled {
 			if lok, lerr := s.ldapAuth(req.Username, req.Password); lok {
-				viaLDAP = true
 				u = s.provisionLDAP(req.Username)
 				ok = true
+				source = "ldap"
 			} else if lerr != nil {
 				s.logger.Warn("ldap auth failed", "username", req.Username, "error", lerr)
+			}
+		}
+		pendingApproval := false
+		if !ok && canFallback && imapEnabled && s.imapDomainAllowed(req.Username) {
+			if iok, ierr := s.imapAuth(req.Username, req.Password); iok {
+				pu, perr := s.provisionIMAP(req.Username)
+				if perr != nil {
+					pendingApproval = true
+				} else {
+					u = pu
+					ok = true
+					source = "imap"
+				}
+			} else if ierr != nil {
+				s.logger.Warn("imap auth failed", "username", req.Username, "error", ierr)
 			}
 		}
 		auditLog.Login(ok)
@@ -206,7 +235,16 @@ func (s *Service) Login(auditLog *audit.Log) http.HandlerFunc {
 			s.bf.RecordFailure(ip, req.Username)
 			auditLog.Add("login_failed", req.Username, ip, "")
 			s.logger.Warn("login failed", "username", req.Username, "ip", ip)
-			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+			status := http.StatusUnauthorized
+			msg := "Invalid credentials"
+			if pendingApproval {
+				status = http.StatusForbidden
+				msg = errPendingApproval.Error()
+				auditLog.Add("login_unapproved", req.Username, ip, "")
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			audit.WriteJSON(w, map[string]string{"error": msg})
 			return
 		}
 
@@ -219,8 +257,8 @@ func (s *Service) Login(auditLog *audit.Log) http.HandlerFunc {
 		s.sessions[token] = session{username: req.Username, role: u.role, expires: time.Now().Add(s.ttl)}
 		s.mu.Unlock()
 
-		auditLog.Add("login_success", req.Username, ip, map[bool]string{true: "ldap", false: "local"}[viaLDAP])
-		s.logger.Info("login", "username", req.Username, "ip", ip, "source", map[bool]string{true: "ldap", false: "local"}[viaLDAP])
+		auditLog.Add("login_success", req.Username, ip, source)
+		s.logger.Info("login", "username", req.Username, "ip", ip, "source", source)
 
 		http.SetCookie(w, &http.Cookie{
 			Name:     cookieName,

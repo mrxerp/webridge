@@ -44,6 +44,7 @@ type Config struct {
 	UI         UIConfig         `yaml:"ui"`
 	Auth       AuthConfig       `yaml:"auth"`
 	LDAP       LDAPConfig       `yaml:"ldap"`
+	IMAP       IMAPEmailConfig  `yaml:"imap"`
 }
 
 type AuditConfig struct {
@@ -89,6 +90,20 @@ type LDAPConfig struct {
 	BindPassword       string   `yaml:"bind_password" json:"bind_password,omitempty"`
 	BaseDN             string   `yaml:"base_dn" json:"base_dn"`
 	UserFilter         string   `yaml:"user_filter" json:"user_filter"`
+	DefaultGroups      []string `yaml:"default_groups" json:"default_groups,omitempty"`
+}
+
+// IMAPEmailConfig lets users sign in with their org email address. The
+// credentials are verified against the org IMAP server; no password is ever
+// stored locally.
+type IMAPEmailConfig struct {
+	Enabled            bool     `yaml:"enabled" json:"enabled"`
+	Host               string   `yaml:"host" json:"host"`
+	Port               int      `yaml:"port" json:"port"`
+	UseStartTLS        bool     `yaml:"starttls" json:"starttls"`
+	InsecureSkipVerify bool     `yaml:"insecure_skip_verify" json:"insecure_skip_verify"`
+	AllowedDomains     []string `yaml:"allowed_domains" json:"allowed_domains,omitempty"`
+	AutoProvision      bool     `yaml:"auto_provision" json:"auto_provision"`
 	DefaultGroups      []string `yaml:"default_groups" json:"default_groups,omitempty"`
 }
 
@@ -185,6 +200,7 @@ func defaults() Config {
 			},
 		},
 		LDAP: LDAPConfig{Port: 389, UserFilter: "(uid=%s)", DefaultGroups: []string{"users"}},
+		IMAP: IMAPEmailConfig{Port: 993, DefaultGroups: []string{"users"}},
 	}
 }
 

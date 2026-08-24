@@ -6,11 +6,11 @@
     const RETRY_DELAYS = [1000, 2000, 4000];
     const ALL_PERMS = ['download', 'audit', 'users'];
     const ALL_ACTIONS = [
-        'login_success', 'login_failed', 'login_locked', 'logout', 'info_check',
-        'download_success', 'download_error',
+        'login_success', 'login_failed', 'login_locked', 'login_unapproved', 'logout',
+        'download_success', 'download_error', 'download_cancel',
         'user_created', 'user_updated', 'user_deleted',
         'group_created', 'group_updated', 'group_deleted',
-        'ldap_updated'
+        'ldap_updated', 'imap_updated', 'imap_tested'
     ];
 
     function trackEvent(action, detail) {
@@ -36,7 +36,9 @@
         userName: document.getElementById('userName'),
         downloadView: document.getElementById('downloadView'),
         logsView: document.getElementById('logsView'),
-        usersView: document.getElementById('usersView'),
+        settingsView: document.getElementById('settingsView'),
+        auditCount: document.getElementById('auditCount'),
+        auditTableWrap: document.getElementById('auditTableWrap'),
         metricActive: document.getElementById('metricActive'),
         metricCompleted: document.getElementById('metricCompleted'),
         metricFailed: document.getElementById('metricFailed'),
@@ -72,6 +74,17 @@
         ldapStartTLS: document.getElementById('ldapStartTLS'),
         ldapInsecure: document.getElementById('ldapInsecure'),
         ldapError: document.getElementById('ldapError'),
+        imapForm: document.getElementById('imapForm'),
+        imapEnabled: document.getElementById('imapEnabled'),
+        imapHost: document.getElementById('imapHost'),
+        imapPort: document.getElementById('imapPort'),
+        imapDomains: document.getElementById('imapDomains'),
+        imapGroups: document.getElementById('imapGroups'),
+        imapStartTLS: document.getElementById('imapStartTLS'),
+        imapInsecure: document.getElementById('imapInsecure'),
+        imapAutoProvision: document.getElementById('imapAutoProvision'),
+        imapError: document.getElementById('imapError'),
+        imapTestBtn: document.getElementById('imapTestBtn'),
         addGroupForm: document.getElementById('addGroupForm'),
         newGroupName: document.getElementById('newGroupName'),
         groupsError: document.getElementById('groupsError'),
@@ -142,6 +155,12 @@
         elements.addUserForm.addEventListener('submit', onAddUser);
         elements.addGroupForm.addEventListener('submit', onAddGroup);
         elements.ldapForm.addEventListener('submit', onSaveLDAP);
+        elements.imapForm.addEventListener('submit', onSaveIMAP);
+        elements.imapTestBtn.addEventListener('click', onTestIMAP);
+        elements.auditTableWrap.addEventListener('scroll', () => {
+            const el = elements.auditTableWrap;
+            if (el.scrollTop + el.clientHeight >= el.scrollHeight - 60) loadMoreAudit();
+        });
 
         for (const action of ALL_ACTIONS) {
             const opt = document.createElement('option');
@@ -183,11 +202,9 @@
 
         setInterval(() => {
             if (!currentUser) return;
-            if (!elements.logsView.hidden) {
-                loadMetrics();
-                loadAuditData();
-                loadBruteForce();
-            }
+            // Audit list is paged/scroll-positioned, so it is not auto-refreshed.
+            if (!elements.logsView.hidden) loadMetrics();
+            if (!elements.settingsView.hidden) loadBruteForce();
         }, 5000);
 
         checkAuth();
@@ -267,21 +284,21 @@
         showLogin();
     }
 
-    const VIEW_PERMS = { logs: 'audit', users: 'users' };
+    const VIEW_PERMS = { logs: 'audit', settings: 'users' };
 
     function switchTab(name) {
         if (VIEW_PERMS[name] && !can(VIEW_PERMS[name])) name = 'download';
         elements.downloadView.hidden = name !== 'download';
         elements.logsView.hidden = name !== 'logs';
-        elements.usersView.hidden = name !== 'users';
+        elements.settingsView.hidden = name !== 'settings';
         elements.container.classList.toggle('wide', name !== 'download');
         if (name === 'download') loadRecent();
         if (name === 'logs') {
             loadMetrics();
             loadAuditData();
-            loadBruteForce();
         }
-        if (name === 'users') {
+        if (name === 'settings') {
+            loadBruteForce();
             loadUsersData();
             loadGroupsData();
         }
@@ -343,6 +360,97 @@
             renderUsers(users || []);
         } catch {}
         loadLdapStatus();
+        loadImapStatus();
+    }
+
+    async function loadImapStatus() {
+        try {
+            const res = await fetch(`${API_BASE}/admin/imap`);
+            if (!res.ok) return;
+            const s = await res.json();
+            elements.imapForm.hidden = false;
+            elements.imapEnabled.checked = !!s.enabled;
+            elements.imapHost.value = s.host || '';
+            elements.imapPort.value = s.port || '';
+            elements.imapDomains.value = (s.allowed_domains || []).join(', ');
+            elements.imapGroups.value = (s.default_groups || []).join(', ');
+            elements.imapStartTLS.checked = !!s.starttls;
+            elements.imapInsecure.checked = !!s.insecure_skip_verify;
+            elements.imapAutoProvision.checked = !!s.auto_provision;
+        } catch {}
+    }
+
+    function imapPayload() {
+        return {
+            enabled: elements.imapEnabled.checked,
+            host: elements.imapHost.value.trim(),
+            port: parseInt(elements.imapPort.value, 10) || 0,
+            starttls: elements.imapStartTLS.checked,
+            insecure_skip_verify: elements.imapInsecure.checked,
+            allowed_domains: elements.imapDomains.value.split(',').map(s => s.trim()).filter(Boolean),
+            default_groups: elements.imapGroups.value.split(',').map(s => s.trim()).filter(Boolean),
+            auto_provision: elements.imapAutoProvision.checked
+        };
+    }
+
+    async function onSaveIMAP(e) {
+        e.preventDefault();
+        const btn = elements.imapForm.querySelector('button[type="submit"]');
+        setLoading(btn, true);
+        hideError(elements.imapError);
+        try {
+            const res = await fetch(`${API_BASE}/admin/imap`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(imapPayload())
+            });
+            if (!res.ok) {
+                showError(elements.imapError, await res.text().catch(() => 'Failed to save email sign-in settings.'));
+                return;
+            }
+            await loadImapStatus();
+        } finally {
+            setLoading(btn, false);
+        }
+    }
+
+    async function onTestIMAP() {
+        hideError(elements.imapError);
+        const email = prompt('Email address to test with:');
+        if (!email) return;
+        const password = prompt('Password for ' + email + ':');
+        if (!password) return;
+        setLoading(elements.imapTestBtn, true);
+        try {
+            // Save first so the test runs against the form's values.
+            const saveRes = await fetch(`${API_BASE}/admin/imap`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(imapPayload())
+            });
+            if (!saveRes.ok) {
+                showError(elements.imapError, await saveRes.text().catch(() => 'Failed to save settings before testing.'));
+                return;
+            }
+            const res = await fetch(`${API_BASE}/admin/imap/test`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: email, password })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || data.error) {
+                showError(elements.imapError, data.error || `Test failed (${res.status}).`);
+            } else if (!data.ok) {
+                showError(elements.imapError, 'Server reachable, but the login was rejected.');
+            } else {
+                elements.imapError.hidden = true;
+                alert('IMAP connection OK — login accepted.');
+            }
+        } catch {
+            showError(elements.imapError, 'Test failed. Please try again.');
+        } finally {
+            setLoading(elements.imapTestBtn, false);
+        }
     }
 
     async function loadLdapStatus() {
@@ -420,8 +528,8 @@
             tr.appendChild(tdName);
 
             const tdSource = document.createElement('td');
-            tdSource.textContent = u.source === 'ldap' ? 'ldap' : 'local';
-            if (u.source === 'ldap') tdSource.className = 'source-ldap';
+            tdSource.textContent = u.source || 'local';
+            if (u.source && u.source !== 'local') tdSource.className = 'source-ext';
             tr.appendChild(tdSource);
 
             const tdRole = document.createElement('td');
@@ -451,7 +559,7 @@
             tr.appendChild(tdGroups);
 
             const tdActions = document.createElement('td');
-            if (u.source !== 'ldap') {
+            if (!u.source || u.source === 'local') {
                 const pwBtn = document.createElement('button');
                 pwBtn.className = 'btn btn-small';
                 pwBtn.textContent = 'Password';
@@ -697,33 +805,77 @@
         loadBruteForce();
     };
 
-    async function loadAuditData() {
+    const AUDIT_PAGE = 200;
+    let auditLoaded = 0;   // rows currently shown
+    let auditTotal = null; // matching events per server, null until first page
+    let auditLoading = false;
+
+    function auditFilterParams() {
         const params = new URLSearchParams();
         if (elements.filterAction.value) params.set('action', elements.filterAction.value);
         if (elements.filterUser.value.trim()) params.set('user', elements.filterUser.value.trim());
         if (elements.filterFrom.value) params.set('from', String(new Date(elements.filterFrom.value).getTime()));
         if (elements.filterTo.value) params.set('to', String(new Date(elements.filterTo.value).getTime()));
-        params.set('limit', '500');
-        const exportParams = new URLSearchParams();
-        if (elements.filterAction.value) exportParams.set('action', elements.filterAction.value);
-        if (elements.filterUser.value.trim()) exportParams.set('user', elements.filterUser.value.trim());
-        if (elements.filterFrom.value) exportParams.set('from', String(new Date(elements.filterFrom.value).getTime()));
-        if (elements.filterTo.value) exportParams.set('to', String(new Date(elements.filterTo.value).getTime()));
-        if (elements.exportCsvBtn) elements.exportCsvBtn.href = `${API_BASE}/admin/audit/export?${exportParams}`;
+        if (elements.exportCsvBtn) elements.exportCsvBtn.href = `${API_BASE}/admin/audit/export?${params}`;
+        return params;
+    }
+
+    async function fetchAuditPage(offset) {
+        const params = auditFilterParams();
+        params.set('limit', String(AUDIT_PAGE));
+        params.set('offset', String(offset));
+        params.set('include_count', '1');
+        const res = await fetch(`${API_BASE}/admin/audit?${params}`);
+        if (!res.ok) throw new Error(String(res.status));
+        return res.json();
+    }
+
+    async function loadAuditData() {
         try {
-            const res = await fetch(`${API_BASE}/admin/audit?${params}`);
-            if (!res.ok) return;
-            const { events } = await res.json();
-            renderAudit(events || []);
+            const data = await fetchAuditPage(0);
+            const events = data.events || [];
+            auditLoaded = events.length;
+            auditTotal = typeof data.total === 'number' ? data.total : null;
+            renderAudit(events, false);
+            updateAuditCount();
         } catch {}
     }
 
-    function renderAudit(events) {
-        elements.auditBody.textContent = '';
-        if (!events.length) {
+    async function loadMoreAudit() {
+        if (auditLoading || auditTotal === null || auditLoaded >= auditTotal) return;
+        auditLoading = true;
+        try {
+            const data = await fetchAuditPage(auditLoaded);
+            const events = data.events || [];
+            appendAuditRows(events);
+            auditLoaded += events.length;
+            if (typeof data.total === 'number') auditTotal = data.total;
+            updateAuditCount();
+        } catch {} finally {
+            auditLoading = false;
+        }
+    }
+
+    function updateAuditCount() {
+        if (auditTotal === null) {
+            elements.auditCount.textContent = '';
+            return;
+        }
+        elements.auditCount.textContent =
+            `Showing ${Math.min(auditLoaded, auditTotal).toLocaleString()} of ${auditTotal.toLocaleString()} events` +
+            (auditLoaded >= auditTotal ? '' : ' — scroll for more');
+    }
+
+    function renderAudit(events, append) {
+        if (!append) elements.auditBody.textContent = '';
+        if (!append && !events.length) {
             emptyRow(elements.auditBody, 5, 'No events yet.');
             return;
         }
+        appendAuditRows(events);
+    }
+
+    function appendAuditRows(events) {
         for (const ev of events) {
             const tr = document.createElement('tr');
             for (const val of [

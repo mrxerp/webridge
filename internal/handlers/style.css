@@ -614,6 +614,29 @@ footer a:hover {
     overflow-x: auto;
 }
 
+/* Fixed-height scrollable table (audit log). The frame never grows with
+   content; rows scroll under a sticky header. */
+.table-wrap.scroll-y {
+    max-height: 55vh;
+    overflow-y: auto;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+}
+
+.scroll-y thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--color-surface);
+    box-shadow: 0 1px 0 var(--color-border);
+}
+
+.audit-count {
+    font-size: 0.8rem;
+    color: var(--color-text-muted);
+    margin: -8px 0 10px;
+}
+
 .audit-table {
     width: 100%;
     border-collapse: collapse;
@@ -760,7 +783,7 @@ footer a:hover {
     flex-wrap: wrap;
 }
 
-.source-ldap {
+.source-ext {
     color: var(--color-secondary);
     font-weight: 600;
 }

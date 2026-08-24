@@ -91,7 +91,10 @@ func (s *Store) flusher() {
 	batch := make([]Event, 0, 500)
 	for {
 		select {
-		case e := <-s.ch:
+		case e, ok := <-s.ch:
+			if !ok {
+				return
+			}
 			batch = append(batch, e)
 			if len(batch) >= 500 {
 				s.drain(batch)
@@ -102,8 +105,6 @@ func (s *Store) flusher() {
 				s.drain(batch)
 				batch = batch[:0]
 			}
-		case <-s.done:
-			return
 		}
 	}
 }
@@ -167,13 +168,8 @@ func (s *Store) Purge(retentionDays int) {
 	s.db.Exec("VACUUM")
 }
 
-// Query retrieves events from SQLite.
-func (s *Store) Query(q Query) []Event {
-	limit := q.Limit
-	if limit <= 0 {
-		limit = 1000
-	}
-
+// filterClause builds the WHERE fragment and args shared by Query and Count.
+func filterClause(q Query) (string, []any) {
 	where := "1=1"
 	args := []any{}
 	if q.Action != "" {
@@ -192,11 +188,26 @@ func (s *Store) Query(q Query) []Event {
 		where += " AND time <= ?"
 		args = append(args, time.UnixMilli(q.ToMs).Format(time.RFC3339))
 	}
+	return where, args
+}
+
+// Query retrieves events from SQLite, newest first.
+func (s *Store) Query(q Query) []Event {
+	limit := q.Limit
+	if limit <= 0 {
+		limit = 1000
+	}
+	offset := q.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	where, args := filterClause(q)
 
 	query := fmt.Sprintf(`SELECT time, action, user, ip, detail, url, provider, filename,
 		file_size, mime_type, resolved_url, bytes_transferred, duration_ms, sha256, anomaly_flags, client_ua
-		FROM audit_events WHERE %s ORDER BY time DESC LIMIT ?`, where)
-	args = append(args, limit)
+		FROM audit_events WHERE %s ORDER BY time DESC LIMIT ? OFFSET ?`, where)
+	args = append(args, limit, offset)
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -222,10 +233,11 @@ func (s *Store) Query(q Query) []Event {
 	return out
 }
 
-// Count returns total event count.
-func (s *Store) Count() int64 {
+// Count returns the number of events matching the query's filters.
+func (s *Store) Count(q Query) int64 {
+	where, args := filterClause(q)
 	var n int64
-	s.db.QueryRow("SELECT COUNT(*) FROM audit_events").Scan(&n)
+	s.db.QueryRow("SELECT COUNT(*) FROM audit_events WHERE "+where, args...).Scan(&n)
 	return n
 }
 

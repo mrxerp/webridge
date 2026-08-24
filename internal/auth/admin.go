@@ -143,9 +143,9 @@ func (s *Service) UpdateUser(auditLog *audit.Log) http.HandlerFunc {
 			http.Error(w, "User not found", http.StatusNotFound)
 			return
 		}
-		if u.source == "ldap" && req.Password != nil && *req.Password != "" {
+		if (u.source == "ldap" || u.source == "imap") && req.Password != nil && *req.Password != "" {
 			s.mu.Unlock()
-			http.Error(w, "Cannot set password for LDAP users — they authenticate via LDAP", http.StatusBadRequest)
+			http.Error(w, "Cannot set password for "+u.source+" users — they authenticate externally", http.StatusBadRequest)
 			return
 		}
 		if req.Groups != nil {
@@ -320,6 +320,77 @@ func (s *Service) saveLDAP() error {
 		return err
 	}
 	return os.WriteFile(s.ldapFile, data, 0o600)
+}
+
+// IMAPStatus returns the runtime email sign-in config. No secrets are stored
+// for IMAP, so the full config is returned.
+func (s *Service) IMAPStatus(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	ic := s.imapCfg
+	s.mu.Unlock()
+	audit.WriteJSON(w, ic)
+}
+
+// UpdateIMAP replaces the runtime email sign-in config and persists it to the
+// override file.
+func (s *Service) UpdateIMAP(auditLog *audit.Log) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req config.IMAPEmailConfig
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		req = normalizeIMAP(req)
+		if req.Enabled && req.Host == "" {
+			http.Error(w, "host is required when enabled", http.StatusBadRequest)
+			return
+		}
+
+		s.mu.Lock()
+		s.imapCfg = req
+		err := s.saveIMAP()
+		s.mu.Unlock()
+		if err != nil {
+			http.Error(w, "saved for this session, but could not persist: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		auditLog.Add("imap_updated", by(r), middleware.ClientIP(r), fmt.Sprintf("enabled=%v host=%s", req.Enabled, req.Host))
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// TestIMAP tries a real IMAP login with the supplied credentials against the
+// currently configured server.
+func (s *Service) TestIMAP(auditLog *audit.Log) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Username string `json:"username"`
+			Password string `json:"password"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Username == "" || req.Password == "" {
+			http.Error(w, "username and password required", http.StatusBadRequest)
+			return
+		}
+		ok, err := s.imapAuth(req.Username, req.Password)
+		auditLog.Add("imap_tested", by(r), middleware.ClientIP(r), fmt.Sprintf("user=%s ok=%v", req.Username, ok))
+		if err != nil {
+			audit.WriteJSON(w, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		audit.WriteJSON(w, map[string]any{"ok": ok})
+	}
+}
+
+func (s *Service) saveIMAP() error {
+	if s.imapFile == "" {
+		return nil
+	}
+	data, err := json.Marshal(s.imapCfg)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.imapFile, data, 0o600)
 }
 
 func normalizePerms(perms []string) ([]string, error) {

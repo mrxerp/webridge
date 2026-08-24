@@ -15,7 +15,7 @@
         <section id="loginSection" hidden>
             <div class="login-card">
                 <h1 class="login-title">{{TITLE}}</h1>
-                <p class="subtitle">Enter your credentials to continue.</p>
+                <p class="subtitle">Sign in with your account or org email address.</p>
                 <form id="loginForm" autocomplete="on">
                     <label for="loginUsername" class="visually-hidden">Username</label>
                     <input type="text" id="loginUsername" placeholder="Username" autocomplete="username" required>
@@ -46,7 +46,7 @@
                         <div id="userMenu" class="dropdown-menu" hidden>
                             <button class="menu-item" type="button" data-view="download">Download</button>
                             <button class="menu-item" type="button" data-view="logs" data-perm="audit">Logs</button>
-                            <button class="menu-item" type="button" data-view="users" data-perm="users">Users</button>
+                            <button class="menu-item" type="button" data-view="settings" data-perm="users">Settings</button>
                             <div class="menu-divider"></div>
                             <button id="logoutBtn" class="menu-item" type="button">Logout</button>
                         </div>
@@ -211,7 +211,8 @@
                             <button id="clearFiltersBtn" class="btn btn-secondary btn-small" type="button">Clear</button>
                             <a id="exportCsvBtn" class="btn btn-secondary btn-small" href="/api/v1/admin/audit/export" target="_blank">Export CSV</a>
                         </form>
-                        <div class="table-wrap">
+                        <p id="auditCount" class="audit-count"></p>
+                        <div class="table-wrap scroll-y" id="auditTableWrap">
                             <table class="audit-table">
                                 <thead>
                                     <tr>
@@ -228,7 +229,8 @@
                             </table>
                         </div>
                     </section>
-
+                </div>
+                <div id="settingsView" hidden>
                     <section class="admin-section">
                         <h2 class="section-title">Login Security</h2>
                         <div id="bruteForceConfig" class="brute-force-config"></div>
@@ -250,10 +252,62 @@
                             </table>
                         </div>
                     </section>
-                </div>
-                <div id="usersView" hidden>
+
                     <section class="admin-section">
-                        <h2 class="section-title">Local Users</h2>
+                        <h2 class="section-title">Email Sign-in (IMAP)</h2>
+                        <p class="hint">Lets users log in with their org email address. Credentials are verified against the IMAP server and never stored. The username field on the login page accepts an email address.</p>
+                        <form id="imapForm" class="ldap-card ldap-form" hidden autocomplete="off">
+                            <label class="ldap-check"><input type="checkbox" id="imapEnabled"> Enabled</label>
+                            <div class="ldap-grid">
+                                <input type="text" id="imapHost" placeholder="Host, e.g. mail.example.com">
+                                <input type="number" id="imapPort" placeholder="Port (993 TLS / 143 StartTLS)">
+                                <input type="text" id="imapDomains" placeholder="Allowed email domains, e.g. example.com (comma-separated)">
+                                <input type="text" id="imapGroups" placeholder="Default groups for new email users (comma-separated)">
+                            </div>
+                            <div class="ldap-check">
+                                <label><input type="checkbox" id="imapStartTLS"> Use StartTLS (plain port upgraded to TLS)</label>
+                                <label><input type="checkbox" id="imapInsecure"> Skip TLS certificate verification</label>
+                                <label><input type="checkbox" id="imapAutoProvision"> Auto-create accounts on first sign-in</label>
+                            </div>
+                            <p id="imapError" class="error-message" hidden></p>
+                            <div class="bf-actions">
+                                <button class="btn btn-primary btn-small" type="submit">
+                                    <span class="btn-text">Save Email Sign-in Settings</span>
+                                    <span class="btn-loader" hidden></span>
+                                </button>
+                                <button id="imapTestBtn" class="btn btn-secondary btn-small" type="button">Test Connection</button>
+                            </div>
+                        </form>
+                    </section>
+
+                    <section class="admin-section">
+                        <h2 class="section-title">LDAP / SSO</h2>
+                        <form id="ldapForm" class="ldap-card ldap-form" hidden autocomplete="off">
+                            <label class="ldap-check"><input type="checkbox" id="ldapEnabled"> Enabled</label>
+                            <div class="ldap-grid">
+                                <input type="text" id="ldapHost" placeholder="Host, e.g. ad.example.com">
+                                <input type="number" id="ldapPort" placeholder="Port (389/636)">
+                                <input type="text" id="ldapBindDN" placeholder="Bind DN (empty = anonymous search)">
+                                <input type="password" id="ldapBindPassword" placeholder="Bind password (blank = unchanged)">
+                                <input type="text" id="ldapBaseDN" placeholder="Base DN, e.g. ou=people,dc=example,dc=com" class="ldap-wide">
+                                <input type="text" id="ldapFilter" placeholder='User filter, e.g. (uid=%s) or (sAMAccountName=%s)'>
+                                <input type="text" id="ldapGroups" placeholder="Default groups for new LDAP users (comma-separated)">
+                            </div>
+                            <div class="ldap-check">
+                                <label><input type="checkbox" id="ldapStartTLS"> StartTLS (plain port upgraded to TLS)</label>
+                                <label><input type="checkbox" id="ldapInsecure"> Skip TLS certificate verification</label>
+                            </div>
+                            <p id="ldapError" class="error-message" hidden></p>
+                            <button class="btn btn-primary btn-small" type="submit">
+                                <span class="btn-text">Save LDAP Settings</span>
+                                <span class="btn-loader" hidden></span>
+                            </button>
+                        </form>
+                    </section>
+
+                    <section class="admin-section">
+                        <h2 class="section-title">Access Control</h2>
+                        <h3 class="section-subtitle">Users</h3>
                         <form id="addUserForm" class="inline-form">
                             <input type="text" id="newUsername" placeholder="Username" autocomplete="off" required>
                             <input type="password" id="newPassword" placeholder="Password" autocomplete="new-password" required>
@@ -281,11 +335,9 @@
                                 <tbody id="usersBody"></tbody>
                             </table>
                         </div>
-                    </section>
 
-                    <section class="admin-section">
-                        <h2 class="section-title">Groups</h2>
-                        <p class="hint">Permissions: <code>download</code> use the downloader &middot; <code>dashboard</code> metrics &middot; <code>audit</code> audit log &middot; <code>users</code> manage users &amp; LDAP &middot; <code>groups</code> manage groups. Full access = the admin <em>role</em>, set per user.</p>
+                        <h3 class="section-subtitle">Groups</h3>
+                        <p class="hint">Permissions: <code>download</code> use the downloader &middot; <code>dashboard</code> metrics &middot; <code>audit</code> audit log &middot; <code>users</code> manage settings &middot; <code>groups</code> manage groups. Full access = the admin <em>role</em>, set per user.</p>
                         <form id="addGroupForm" class="inline-form">
                             <input type="text" id="newGroupName" placeholder="Group name" autocomplete="off" required>
                             <span id="newGroupPerms"></span>
@@ -307,31 +359,6 @@
                                 <tbody id="groupsBody"></tbody>
                             </table>
                         </div>
-                    </section>
-
-                    <section class="admin-section">
-                        <h2 class="section-title">LDAP / SSO</h2>
-                        <form id="ldapForm" class="ldap-card ldap-form" hidden autocomplete="off">
-                            <label class="ldap-check"><input type="checkbox" id="ldapEnabled"> Enabled</label>
-                            <div class="ldap-grid">
-                                <input type="text" id="ldapHost" placeholder="Host, e.g. ad.example.com">
-                                <input type="number" id="ldapPort" placeholder="Port (389/636)">
-                                <input type="text" id="ldapBindDN" placeholder="Bind DN (empty = anonymous search)">
-                                <input type="password" id="ldapBindPassword" placeholder="Bind password (blank = unchanged)">
-                                <input type="text" id="ldapBaseDN" placeholder="Base DN, e.g. ou=people,dc=example,dc=com" class="ldap-wide">
-                                <input type="text" id="ldapFilter" placeholder='User filter, e.g. (uid=%s) or (sAMAccountName=%s)'>
-                                <input type="text" id="ldapGroups" placeholder="Default groups for new LDAP users (comma-separated)">
-                            </div>
-                            <div class="ldap-check">
-                                <label><input type="checkbox" id="ldapStartTLS"> StartTLS (plain port upgraded to TLS)</label>
-                                <label><input type="checkbox" id="ldapInsecure"> Skip TLS certificate verification</label>
-                            </div>
-                            <p id="ldapError" class="error-message" hidden></p>
-                            <button class="btn btn-primary btn-small" type="submit">
-                                <span class="btn-text">Save LDAP Settings</span>
-                                <span class="btn-loader" hidden></span>
-                            </button>
-                        </form>
                     </section>
                 </div>
 

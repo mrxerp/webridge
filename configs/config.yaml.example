@@ -66,3 +66,16 @@ auth:
 #   base_dn: "ou=people,dc=example,dc=com"
 #   user_filter: "(uid=%s)"    # Active Directory: "(sAMAccountName=%s)"
 #   default_groups: ["users"]  # local groups auto-assigned on first login
+
+# imap: email sign-in — users can log in with their org email address;
+# credentials are verified against the IMAP server, never stored locally.
+# Runtime-editable from Settings (persisted to imap-settings.json).
+# imap:
+#   enabled: true
+#   host: "mail.example.com"
+#   port: 993                  # 993 = TLS (default), 143 + starttls below
+#   starttls: false            # upgrade plain 143 connections to TLS
+#   insecure_skip_verify: false
+#   allowed_domains: ["example.com"]  # only these email domains may sign in
+#   auto_provision: true       # create account on first successful login
+#   default_groups: ["users"]  # groups for auto-created accounts

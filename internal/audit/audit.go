@@ -161,6 +161,7 @@ func (l *Log) detectAnomalies(e Event) []string {
 
 type Query struct {
 	Limit  int
+	Offset int
 	Action string
 	User   string
 	FromMs int64
@@ -174,6 +175,14 @@ func (l *Log) Query(q Query) []Event {
 	return l.queryMemory(q)
 }
 
+// Count returns how many events match the query's filters (ignores Limit/Offset).
+func (l *Log) Count(q Query) int64 {
+	if l.store != nil {
+		return l.store.Count(q)
+	}
+	return int64(len(l.queryMemory(Query{Action: q.Action, User: q.User, FromMs: q.FromMs, ToMs: q.ToMs})))
+}
+
 func (l *Log) queryMemory(q Query) []Event {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -182,6 +191,7 @@ func (l *Log) queryMemory(q Query) []Event {
 		limit = len(l.events)
 	}
 	out := make([]Event, 0, limit)
+	skipped := 0
 	for i := len(l.events) - 1; i >= 0 && len(out) < limit; i-- {
 		e := l.events[i]
 		if q.Action != "" && e.Action != q.Action {
@@ -195,6 +205,10 @@ func (l *Log) queryMemory(q Query) []Event {
 			continue
 		}
 		if q.ToMs > 0 && ms > q.ToMs {
+			continue
+		}
+		if skipped < q.Offset {
+			skipped++
 			continue
 		}
 		out = append(out, e)
@@ -241,15 +255,22 @@ func (l *Log) MetricsHandler(w http.ResponseWriter, r *http.Request) {
 func (l *Log) EventsHandler(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
+	offset, _ := strconv.Atoi(q.Get("offset"))
 	fromMs, _ := strconv.ParseInt(q.Get("from"), 10, 64)
 	toMs, _ := strconv.ParseInt(q.Get("to"), 10, 64)
-	WriteJSON(w, map[string]any{"events": l.Query(Query{
+	query := Query{
 		Limit:  limit,
+		Offset: offset,
 		Action: q.Get("action"),
 		User:   q.Get("user"),
 		FromMs: fromMs,
 		ToMs:   toMs,
-	})})
+	}
+	resp := map[string]any{"events": l.Query(query)}
+	if q.Get("include_count") != "" {
+		resp["total"] = l.Count(query)
+	}
+	WriteJSON(w, resp)
 }
 
 // LogClientEvent handles POST /api/v1/audit/log from the frontend.

@@ -59,7 +59,11 @@ func main() {
 	if ldapFile == "" {
 		ldapFile = filepath.Join(filepath.Dir(*configPath), "ldap-settings.json")
 	}
-	authSvc := auth.New(cfg, logger, ldapFile)
+	imapFile := os.Getenv("IMAP_SETTINGS_FILE")
+	if imapFile == "" {
+		imapFile = filepath.Join(filepath.Dir(*configPath), "imap-settings.json")
+	}
+	authSvc := auth.New(cfg, logger, ldapFile, imapFile)
 	downloadHandler := handlers.NewDownloadHandler(cfg, logger, auditLog, wtClient)
 	uiHandler := handlers.UIHandler(cfg)
 
@@ -89,6 +93,9 @@ func main() {
 	mux.Handle("GET /api/v1/admin/users", guard("users", http.HandlerFunc(authSvc.ListUsers)))
 	mux.Handle("GET /api/v1/admin/ldap", guard("users", http.HandlerFunc(authSvc.LDAPStatus)))
 	mux.Handle("PUT /api/v1/admin/ldap", guard("users", http.HandlerFunc(authSvc.UpdateLDAP(auditLog))))
+	mux.Handle("GET /api/v1/admin/imap", guard("users", http.HandlerFunc(authSvc.IMAPStatus)))
+	mux.Handle("PUT /api/v1/admin/imap", guard("users", http.HandlerFunc(authSvc.UpdateIMAP(auditLog))))
+	mux.Handle("POST /api/v1/admin/imap/test", guard("users", http.HandlerFunc(authSvc.TestIMAP(auditLog))))
 	mux.Handle("POST /api/v1/admin/users", guard("users", http.HandlerFunc(authSvc.CreateUser(auditLog))))
 	mux.Handle("PUT /api/v1/admin/users/{username}", guard("users", http.HandlerFunc(authSvc.UpdateUser(auditLog))))
 	mux.Handle("DELETE /api/v1/admin/users/{username}", guard("users", http.HandlerFunc(authSvc.DeleteUser(auditLog))))
