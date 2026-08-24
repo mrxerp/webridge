@@ -14,28 +14,28 @@ import (
 	"webridge/internal/auth"
 	"webridge/internal/config"
 	"webridge/internal/middleware"
-	"webridge/internal/wetransfer"
+	"webridge/internal/providers"
 )
 
 type DownloadHandler struct {
-	cfg    *config.Config
-	logger *slog.Logger
-	sem    chan struct{}
-	audit  *audit.Log
-	wt     *wetransfer.Client
+	cfg       *config.Config
+	logger    *slog.Logger
+	sem       chan struct{}
+	audit     *audit.Log
+	providers *providers.Registry
 }
 
-func NewDownloadHandler(cfg *config.Config, logger *slog.Logger, auditLog *audit.Log, wt *wetransfer.Client) *DownloadHandler {
+func NewDownloadHandler(cfg *config.Config, logger *slog.Logger, auditLog *audit.Log, providers *providers.Registry) *DownloadHandler {
 	maxConcurrent := cfg.Limits.MaxConcurrentDownloads
 	if maxConcurrent <= 0 {
 		maxConcurrent = 50
 	}
 	return &DownloadHandler{
-		cfg:    cfg,
-		logger: logger,
-		sem:    make(chan struct{}, maxConcurrent),
-		audit:  auditLog,
-		wt:     wt,
+		cfg:       cfg,
+		logger:    logger,
+		sem:       make(chan struct{}, maxConcurrent),
+		audit:     auditLog,
+		providers: providers,
 	}
 }
 
@@ -54,24 +54,11 @@ func (h *DownloadHandler) urlParamOr400(w http.ResponseWriter, r *http.Request) 
 	return url
 }
 
-func isShortWeTransferURL(u string) bool {
-	return strings.HasPrefix(u, "https://we.tl/") || strings.HasPrefix(u, "http://we.tl/")
-}
-
-func shortURLError(w http.ResponseWriter, err error) {
-	if strings.Contains(err.Error(), "redirect/error") || strings.Contains(err.Error(), "data center IP") {
-		http.Error(w, "Short WeTransfer links (we.tl/...) are blocked by WeTransfer from data center IPs. This server may be on a data center IP. Solution: Use the full download link (https://wetransfer.com/downloads/...). On a residential IP server, short links work automatically.", http.StatusBadGateway)
-		return
-	}
-	http.Error(w, "Short WeTransfer link error: "+err.Error(), http.StatusBadGateway)
-}
-
 func (h *DownloadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	urlParam := h.urlParamOr400(w, r)
 	if urlParam == "" {
 		return
 	}
-	isShortURL := isShortWeTransferURL(urlParam)
 
 	ctx := r.Context()
 
@@ -88,10 +75,19 @@ func (h *DownloadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	username := auth.Username(r.Context())
 	h.audit.StartDownload()
 
-	info, err := h.wt.Resolve(ctx, urlParam, r.URL.Query().Get("password"))
+	provider, err := h.providers.ResolveProvider(urlParam)
 	if err != nil {
-		h.logDownload(username, clientIP, urlParam, "", 0, 0, time.Since(start), "error", err.Error(), "")
-		var pwErr *wetransfer.PasswordRequiredError
+		h.logDownload(username, clientIP, urlParam, nil, 0, err, time.Since(start))
+		http.Error(w, "Unsupported URL.", http.StatusBadRequest)
+		return
+	}
+
+	isShortURL := provider.Name() == "wetransfer" && (strings.HasPrefix(urlParam, "https://we.tl/") || strings.HasPrefix(urlParam, "http://we.tl/"))
+
+	info, err := provider.Resolve(ctx, urlParam, r.URL.Query().Get("password"))
+	if err != nil {
+		h.logDownload(username, clientIP, urlParam, nil, 0, err, time.Since(start))
+		var pwErr *providers.PasswordRequiredError
 		if errors.As(err, &pwErr) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
@@ -112,7 +108,7 @@ func (h *DownloadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if info.FileSize > 0 {
 		maxSize := int64(h.cfg.Limits.MaxFileSizeGB) * 1024 * 1024 * 1024
 		if info.FileSize > maxSize {
-			h.logDownload(username, clientIP, urlParam, info.FileName, info.FileSize, 0, time.Since(start), "error", "file too large", "")
+			h.logDownload(username, clientIP, urlParam, info, 0, errors.New("file too large"), time.Since(start))
 			http.Error(w, "File size exceeds limit", http.StatusRequestEntityTooLarge)
 			return
 		}
@@ -127,53 +123,113 @@ func (h *DownloadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.cfg.Audit.HashDownloads && info.FileSize > 0 && info.FileSize <= int64(h.cfg.Audit.MaxHashSizeMB)*1024*1024 {
 		hw := &hashWriter{ResponseWriter: w, h: sha256.New()}
 		streamW = hw
-		defer func() { hashHex = hw.hex() }()
+		defer func() {
+			hashHex = hex.EncodeToString(hw.h.Sum(nil))
+		}()
 	}
 
-	bytesWritten, err := h.wt.Stream(ctx, info, streamW)
+	n, err := provider.Stream(ctx, info, streamW)
 	if err != nil {
-		if !wetransfer.IsClientDisconnect(err) {
+		if !providers.IsClientDisconnect(err) {
 			h.logger.Error("stream error", "error", err, "url", urlParam)
 		}
-		h.logDownload(username, clientIP, urlParam, info.FileName, info.FileSize, bytesWritten, time.Since(start), "error", err.Error(), hashHex)
+		h.logDownload(username, clientIP, urlParam, info, n, err, time.Since(start))
 		return
 	}
 
-	h.logDownload(username, clientIP, urlParam, info.FileName, info.FileSize, bytesWritten, time.Since(start), "success", "", hashHex)
-}
-
-func (h *DownloadHandler) logDownload(username, clientIP, url, filename string, size, bytes int64, duration time.Duration, status, errMsg, sha256 string) {
-	h.logger.Info("download",
-		"user", username,
-		"ip", clientIP,
-		"url", url,
-		"filename", filename,
-		"size", size,
-		"bytes_transferred", bytes,
-		"duration_ms", duration.Milliseconds(),
-		"status", status,
-		"error", errMsg,
-	)
-	detail := filename
-	if errMsg != "" {
-		detail = filename + " — " + errMsg
-	}
-	h.audit.EndDownload(status == "success", bytes)
 	h.audit.AddEvent(audit.Event{
 		Time:             time.Now(),
-		Action:           "download_" + status,
+		Action:           "download_success",
 		User:             username,
 		IP:               clientIP,
-		Detail:           detail,
-		URL:              url,
-		BytesTransferred: bytes,
-		DurationMS:       duration.Milliseconds(),
-		SHA256:           sha256,
+		Detail:           "success",
+		URL:              urlParam,
+		Provider:         provider.Name(),
+		Filename:         info.FileName,
+		FileSize:         info.FileSize,
+		MimeType:         "",
+		ResolvedURL:      info.DirectURL,
+		BytesTransferred: n,
+		DurationMS:       time.Since(start).Milliseconds(),
+		SHA256:           hashHex,
+		AnomalyFlags:     nil,
+		ClientUA:         r.UserAgent(),
 	})
 }
 
-// RecentHandler serves the current user's last download attempts (newest
-// first) for the Downloads tab "Recent" list.
+func (h *DownloadHandler) InfoHandler(w http.ResponseWriter, r *http.Request) {
+	urlParam := h.urlParamOr400(w, r)
+	if urlParam == "" {
+		return
+	}
+
+	ctx := r.Context()
+	start := time.Now()
+	clientIP := middleware.ClientIP(r)
+	username := auth.Username(r.Context())
+	h.audit.Add("info_check", username, clientIP, urlParam)
+
+	provider, err := h.providers.ResolveProvider(urlParam)
+	if err != nil {
+		h.logDownload(username, clientIP, urlParam, nil, 0, err, time.Since(start))
+		http.Error(w, "Unsupported URL. Only WeTransfer links are supported.", http.StatusBadRequest)
+		return
+	}
+
+	isShortURL := provider.Name() == "wetransfer" && (strings.HasPrefix(urlParam, "https://we.tl/") || strings.HasPrefix(urlParam, "http://we.tl/"))
+
+	info, err := provider.Resolve(ctx, urlParam, r.URL.Query().Get("password"))
+	if err != nil {
+		h.logDownload(username, clientIP, urlParam, nil, 0, err, time.Since(start))
+		var pwErr *providers.PasswordRequiredError
+		if errors.As(err, &pwErr) {
+			w.Header().Set("Content-Type", "application/json")
+			audit.WriteJSON(w, map[string]any{
+				"needs_password": true,
+				"error":          "This transfer is password-protected",
+			})
+			return
+		}
+		h.logger.Warn("resolve failed", "url", urlParam, "error", err.Error())
+		if isShortURL {
+			shortURLError(w, err)
+			return
+		}
+		http.Error(w, "Failed to resolve: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+
+	h.audit.AddEvent(audit.Event{
+		Time:           time.Now(),
+		Action:         "info_check",
+		User:           username,
+		IP:             clientIP,
+		Detail:         "success",
+		URL:            urlParam,
+		Provider:       provider.Name(),
+		Filename:       info.FileName,
+		FileSize:       info.FileSize,
+		MimeType:       "",
+		ResolvedURL:    info.DirectURL,
+		BytesTransferred: 0,
+		DurationMS:     time.Since(start).Milliseconds(),
+		SHA256:         "",
+		AnomalyFlags:   nil,
+		ClientUA:       r.UserAgent(),
+	})
+
+	resp := map[string]any{
+		"provider":    provider.Name(),
+		"filename":    info.FileName,
+		"size":        info.FileSize,
+		"size_human":  audit.FormatBytes(info.FileSize),
+		"file_count":  info.FileCount,
+		"is_short":    isShortURL,
+	}
+
+	audit.WriteJSON(w, resp)
+}
+
 func (h *DownloadHandler) RecentHandler(w http.ResponseWriter, r *http.Request) {
 	username := auth.Username(r.Context())
 	events := h.audit.Query(audit.Query{User: username, Limit: 100})
@@ -199,49 +255,76 @@ func sanitizeFilename(name string) string {
 	return name
 }
 
-func (h *DownloadHandler) InfoHandler(w http.ResponseWriter, r *http.Request) {
-	urlParam := h.urlParamOr400(w, r)
-	if urlParam == "" {
-		return
+func shortURLError(w http.ResponseWriter, err error) {
+	if strings.Contains(err.Error(), "redirect/error") || strings.Contains(err.Error(), "data center IP") {
+		http.Error(w, "Short WeTransfer links (we.tl/...) are blocked by WeTransfer from data center IPs. This server may be on a data center IP range.", http.StatusBadGateway)
+	} else {
+		http.Error(w, "Failed to resolve short URL. Try the full WeTransfer link.", http.StatusBadGateway)
+	}
+}
+
+func (h *DownloadHandler) logDownload(username, clientIP, urlParam string, info *providers.TransferInfo, n int64, err error, dur time.Duration) {
+	action := "download_success"
+	detail := "success"
+	sha256Sum := ""
+	providerName := ""
+	filename := ""
+	filesize := int64(0)
+	resolvedURL := ""
+
+	if info != nil {
+		providerName = providerFromURL(urlParam)
+		filename = info.FileName
+		filesize = info.FileSize
+		resolvedURL = info.DirectURL
 	}
 
-	ctx := r.Context()
-	h.audit.Add("info_check", auth.Username(ctx), middleware.ClientIP(r), urlParam)
-
-	isShortURL := isShortWeTransferURL(urlParam)
-
-	info, err := h.wt.Resolve(ctx, urlParam, r.URL.Query().Get("password"))
 	if err != nil {
-		var pwErr *wetransfer.PasswordRequiredError
-		if errors.As(err, &pwErr) {
-			w.Header().Set("Content-Type", "application/json")
-			audit.WriteJSON(w, map[string]any{
-				"needs_password": true,
-				"error":          "This transfer is password-protected",
-			})
-			return
-		}
-		h.logger.Warn("resolve failed", "url", urlParam, "error", err.Error())
-		if isShortURL {
-			shortURLError(w, err)
-			return
-		}
-		http.Error(w, "Failed to resolve: "+err.Error(), http.StatusBadGateway)
-		return
+		detail = "error: " + err.Error()
+		action = "download_error"
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-cache")
-
-	resp := map[string]any{
-		"provider":   "wetransfer",
-		"filename":   info.FileName,
-		"size":       info.FileSize,
-		"size_human": audit.FormatBytes(info.FileSize),
-		"file_count": info.FileCount,
+	if info != nil && providerName == "" {
+		providerName = providerFromURL(urlParam)
 	}
 
-	audit.WriteJSON(w, resp)
+	h.audit.AddEvent(audit.Event{
+		Time:             time.Now(),
+		Action:           action,
+		User:             username,
+		IP:               clientIP,
+		Detail:           detail,
+		URL:              urlParam,
+		Provider:         providerName,
+		Filename:         filename,
+		FileSize:         filesize,
+		MimeType:         "",
+		ResolvedURL:      resolvedURL,
+		BytesTransferred: n,
+		DurationMS:       dur.Milliseconds(),
+		SHA256:           sha256Sum,
+		AnomalyFlags:     nil,
+		ClientUA:         "",
+	})
+}
+
+func providerFromURL(url string) string {
+	if strings.Contains(url, "wetransfer") || strings.Contains(url, "we.tl") {
+		return "wetransfer"
+	}
+	if strings.Contains(url, "sendgb") {
+		return "sendgb"
+	}
+	if strings.Contains(url, "transfernow") {
+		return "transfernow"
+	}
+	if strings.Contains(url, "wesendit") {
+		return "wesendit"
+	}
+	if strings.Contains(url, "sendspace") {
+		return "sendspace"
+	}
+	return "unknown"
 }
 
 type hashWriter struct {
@@ -253,8 +336,4 @@ func (hw *hashWriter) Write(p []byte) (int, error) {
 	n, err := hw.ResponseWriter.Write(p)
 	hw.h.Write(p[:n])
 	return n, err
-}
-
-func (hw *hashWriter) hex() string {
-	return hex.EncodeToString(hw.h.Sum(nil))
 }

@@ -16,8 +16,8 @@ import (
 	"webridge/internal/auth"
 	"webridge/internal/config"
 	"webridge/internal/handlers"
+	"webridge/internal/providers"
 	appmiddleware "webridge/internal/middleware"
-	"webridge/internal/wetransfer"
 )
 
 func main() {
@@ -32,7 +32,38 @@ func main() {
 
 	logger := setupLogger(cfg.Logging)
 
-	wtClient := wetransfer.NewClient(time.Duration(cfg.WeTransfer.RequestTimeout), cfg.WeTransfer.MaxRedirects)
+	// Initialize provider registry
+	providerRegistry := providers.NewRegistry()
+	wtClient := providers.NewWeTransferClient(providers.ClientConfig{
+		RequestTimeout: time.Duration(cfg.WeTransfer.RequestTimeout),
+		MaxRedirects:   cfg.WeTransfer.MaxRedirects,
+	})
+	providerRegistry.Register(wtClient)
+
+	// Register additional providers
+	sendgbClient := providers.NewSendGBClient(providers.ClientConfig{
+		RequestTimeout: time.Duration(cfg.WeTransfer.RequestTimeout),
+		MaxRedirects:   cfg.WeTransfer.MaxRedirects,
+	})
+	providerRegistry.Register(sendgbClient)
+
+	transferNowClient := providers.NewTransferNowClient(providers.ClientConfig{
+		RequestTimeout: time.Duration(cfg.WeTransfer.RequestTimeout),
+		MaxRedirects:   cfg.WeTransfer.MaxRedirects,
+	})
+	providerRegistry.Register(transferNowClient)
+
+	wesenditClient := providers.NewWesenditClient(providers.ClientConfig{
+		RequestTimeout: time.Duration(cfg.WeTransfer.RequestTimeout),
+		MaxRedirects:   cfg.WeTransfer.MaxRedirects,
+	})
+	providerRegistry.Register(wesenditClient)
+
+	sendSpaceClient := providers.NewSendSpaceClient(providers.ClientConfig{
+		RequestTimeout: time.Duration(cfg.WeTransfer.RequestTimeout),
+		MaxRedirects:   cfg.WeTransfer.MaxRedirects,
+	})
+	providerRegistry.Register(sendSpaceClient)
 
 	rateLimiter := appmiddleware.NewRateLimiter(cfg.Limits.RateLimitPerMinute)
 
@@ -63,7 +94,7 @@ func main() {
 		imapFile = filepath.Join(filepath.Dir(*configPath), "imap-settings.json")
 	}
 	authSvc := auth.New(cfg, logger, ldapFile, imapFile)
-	downloadHandler := handlers.NewDownloadHandler(cfg, logger, auditLog, wtClient)
+	downloadHandler := handlers.NewDownloadHandler(cfg, logger, auditLog, providerRegistry)
 	uiHandler := handlers.UIHandler(cfg)
 
 	mux := http.NewServeMux()
