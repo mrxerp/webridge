@@ -4,7 +4,8 @@
     const API_BASE = '/api/v1';
     const MAX_RETRIES = 3;
     const RETRY_DELAYS = [1000, 2000, 4000];
-    const ALL_PERMS = ['download', 'audit', 'users'];
+    // Overwritten with the server's authoritative list at login (/me → all_perms).
+    let ALL_PERMS = ['download', 'audit', 'users', 'groups'];
     const ALL_ACTIONS = [
         'login_success', 'login_failed', 'login_locked', 'login_unapproved', 'logout',
         'download_success', 'download_error', 'download_cancel',
@@ -46,7 +47,6 @@
         metricLogins: document.getElementById('metricLogins'),
         metricLoginFails: document.getElementById('metricLoginFails'),
         auditBody: document.getElementById('auditBody'),
-        refreshAuditBtn: document.getElementById('refreshAuditBtn'),
         logoutBtn: document.getElementById('logoutBtn'),
         auditFilterForm: document.getElementById('auditFilterForm'),
         exportCsvBtn: document.getElementById('exportCsvBtn'),
@@ -168,18 +168,6 @@
             opt.textContent = action.replaceAll('_', ' ');
             elements.filterAction.appendChild(opt);
         }
-        for (const perm of ALL_PERMS) {
-            const label = document.createElement('label');
-            label.className = 'perm-label';
-            const cb = document.createElement('input');
-            cb.type = 'checkbox';
-            cb.className = 'new-perm';
-            cb.value = perm;
-            label.appendChild(cb);
-            label.appendChild(document.createTextNode(' ' + perm));
-            elements.newGroupPerms.appendChild(label);
-        }
-
         elements.urlInput.addEventListener('input', onUrlInput);
         elements.urlInput.addEventListener('keydown', e => {
             if (e.key === 'Enter') onCheckClick();
@@ -238,6 +226,7 @@
 
     function showApp(user) {
         currentUser = user;
+        if (Array.isArray(user.all_perms) && user.all_perms.length) ALL_PERMS = user.all_perms;
         elements.loginSection.hidden = true;
         elements.appView.hidden = false;
         elements.userName.textContent = user.username;
@@ -298,9 +287,25 @@
             loadAuditData();
         }
         if (name === 'settings') {
+            buildPermLabels();
             loadBruteForce();
             loadUsersData();
             loadGroupsData();
+        }
+    }
+
+    function buildPermLabels() {
+        elements.newGroupPerms.textContent = '';
+        for (const perm of ALL_PERMS) {
+            const label = document.createElement('label');
+            label.className = 'perm-label';
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = 'new-perm';
+            cb.value = perm;
+            label.appendChild(cb);
+            label.appendChild(document.createTextNode(' ' + perm));
+            elements.newGroupPerms.appendChild(label);
         }
     }
 
@@ -742,16 +747,38 @@
             if (!res.ok) return;
             const state = await res.json();
             const cfg = state.config || {};
-            elements.bruteForceConfig.innerHTML = `
-                <div class="bf-field"><label>Max Attempts</label><input type="number" id="bfMaxAttempts" value="${cfg.max_attempts || 5}" min="1"></div>
-                <div class="bf-field"><label>Window (min)</label><input type="number" id="bfWindow" value="${cfg.window_minutes || 15}" min="1"></div>
-                <div class="bf-field"><label>Backoff Base (min)</label><input type="number" id="bfBackoffBase" value="${cfg.backoff_base_minutes || 1}" min="1"></div>
-                <div class="bf-field"><label>Backoff Max (min)</label><input type="number" id="bfBackoffMax" value="${cfg.backoff_max_minutes || 64}" min="1"></div>
-                <div class="bf-actions">
-                    <button class="btn btn-primary btn-small" onclick="saveBruteForceConfig()">Save</button>
-                    <button class="btn btn-danger btn-small" onclick="resetBruteForceAll()">Unlock All</button>
-                </div>
-            `;
+            elements.bruteForceConfig.textContent = '';
+            for (const [id, label, val] of [
+                ['bfMaxAttempts', 'Max Attempts', cfg.max_attempts || 5],
+                ['bfWindow', 'Window (min)', cfg.window_minutes || 15],
+                ['bfBackoffBase', 'Backoff Base (min)', cfg.backoff_base_minutes || 1],
+                ['bfBackoffMax', 'Backoff Max (min)', cfg.backoff_max_minutes || 64]
+            ]) {
+                const field = document.createElement('div');
+                field.className = 'bf-field';
+                const lab = document.createElement('label');
+                lab.textContent = label;
+                const input = document.createElement('input');
+                input.type = 'number';
+                input.id = id;
+                input.min = 1;
+                input.value = val;
+                field.append(lab, input);
+                elements.bruteForceConfig.appendChild(field);
+            }
+            const actions = document.createElement('div');
+            actions.className = 'bf-actions';
+            const saveBtn = document.createElement('button');
+            saveBtn.className = 'btn btn-primary btn-small';
+            saveBtn.textContent = 'Save';
+            saveBtn.addEventListener('click', saveBruteForceConfig);
+            const unlockAllBtn = document.createElement('button');
+            unlockAllBtn.className = 'btn btn-danger btn-small';
+            unlockAllBtn.textContent = 'Unlock All';
+            unlockAllBtn.addEventListener('click', resetBruteForceAll);
+            actions.append(saveBtn, unlockAllBtn);
+            elements.bruteForceConfig.appendChild(actions);
+
             const locks = state.locks || [];
             elements.bruteForceBody.textContent = '';
             if (!locks.length) {
@@ -761,23 +788,40 @@
             for (const lock of locks) {
                 const tr = document.createElement('tr');
                 const until = new Date(lock.lockout_until);
-                const now = new Date();
-                const remaining = until > now ? Math.ceil((until - now) / 60000) + 'm' : 'expired';
-                tr.innerHTML = `
-                    <td><span class="lock-type-${lock.type}">${lock.type}</span></td>
-                    <td>${escapeHtml(lock.key)}</td>
-                    <td>${lock.failures}</td>
-                    <td>${until.toLocaleString()} (${remaining})</td>
-                    <td class="action-cell">
-                        <button class="btn btn-danger btn-small" onclick="resetBruteForceItem('${lock.type}','${escapeHtml(lock.key)}')">Unlock</button>
-                    </td>
-                `;
+                const remaining = until > new Date() ? Math.ceil((until - new Date()) / 60000) + 'm' : 'expired';
+
+                const tdType = document.createElement('td');
+                tdType.innerHTML = `<span class="lock-type-${lock.type}"></span>`;
+                tdType.firstChild.textContent = lock.type;
+                tr.appendChild(tdType);
+
+                const tdKey = document.createElement('td');
+                tdKey.textContent = lock.key;
+                tr.appendChild(tdKey);
+
+                const tdFailures = document.createElement('td');
+                tdFailures.textContent = lock.failures;
+                tr.appendChild(tdFailures);
+
+                const tdUntil = document.createElement('td');
+                tdUntil.textContent = `${until.toLocaleString()} (${remaining})`;
+                tr.appendChild(tdUntil);
+
+                const tdActions = document.createElement('td');
+                tdActions.className = 'action-cell';
+                const unlockBtn = document.createElement('button');
+                unlockBtn.className = 'btn btn-danger btn-small';
+                unlockBtn.textContent = 'Unlock';
+                unlockBtn.addEventListener('click', () => resetBruteForceItem(lock));
+                tdActions.appendChild(unlockBtn);
+                tr.appendChild(tdActions);
+
                 elements.bruteForceBody.appendChild(tr);
             }
         } catch {}
     }
 
-    window.saveBruteForceConfig = async function() {
+    async function saveBruteForceConfig() {
         const cfg = {
             max_attempts: parseInt(document.getElementById('bfMaxAttempts')?.value) || 5,
             window_minutes: parseInt(document.getElementById('bfWindow')?.value) || 15,
@@ -788,22 +832,14 @@
             method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg)
         });
         loadBruteForce();
-    };
+    }
 
-    window.resetBruteForceAll = async function() {
+    async function resetBruteForceAll() {
         await fetch(`${API_BASE}/admin/bruteforce/reset`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ all: true })
         });
         loadBruteForce();
-    };
-
-    window.resetBruteForceItem = async function(type, key) {
-        const body = type === 'ip' ? { ip: key } : { username: key };
-        await fetch(`${API_BASE}/admin/bruteforce/reset`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-        });
-        loadBruteForce();
-    };
+    }
 
     const AUDIT_PAGE = 200;
     let auditLoaded = 0;   // rows currently shown

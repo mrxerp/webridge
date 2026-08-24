@@ -2,6 +2,7 @@ package auth
 
 import (
 	"math"
+	"strconv"
 	"sync"
 	"time"
 
@@ -72,7 +73,7 @@ func (b *Bruteforce) Check(ip, username string) (locked bool, reason string) {
 }
 
 // RecordFailure increments failure counters and applies lockout if threshold is hit.
-func (b *Bruteforce) RecordFailure(ip, username string) (locked bool, lockoutMinutes int) {
+func (b *Bruteforce) RecordFailure(ip, username string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -89,25 +90,15 @@ func (b *Bruteforce) RecordFailure(ip, username string) (locked bool, lockoutMin
 
 	// Lock IP if threshold hit
 	if ipTracker.failures >= b.cfg.MaxAttempts {
-		lockout := b.computeLockout(ipTracker.backoffStep)
-		ipTracker.lockoutUntil = now.Add(time.Duration(lockout) * time.Minute)
+		ipTracker.lockoutUntil = now.Add(time.Duration(b.computeLockout(ipTracker.backoffStep)) * time.Minute)
 		ipTracker.backoffStep++
-		locked = true
-		lockoutMinutes = lockout
 	}
 
 	// Lock username if threshold hit
 	if userTracker.failures >= b.cfg.MaxAttempts {
-		lockout := b.computeLockout(userTracker.backoffStep)
-		userTracker.lockoutUntil = now.Add(time.Duration(lockout) * time.Minute)
+		userTracker.lockoutUntil = now.Add(time.Duration(b.computeLockout(userTracker.backoffStep)) * time.Minute)
 		userTracker.backoffStep++
-		locked = true
-		if lockout > lockoutMinutes {
-			lockoutMinutes = lockout
-		}
 	}
-
-	return
 }
 
 // Reset clears both IP and username trackers on successful login.
@@ -119,11 +110,10 @@ func (b *Bruteforce) Reset(ip, username string) {
 }
 
 type LockInfo struct {
-	Key           string    `json:"key"`
-	Type          string    `json:"type"`
-	Failures      int       `json:"failures"`
-	LockoutUntil  time.Time `json:"lockout_until"`
-	BackoffStep   int       `json:"backoff_step"`
+	Key          string    `json:"key"`
+	Type         string    `json:"type"`
+	Failures     int       `json:"failures"`
+	LockoutUntil time.Time `json:"lockout_until"`
 }
 
 type BruteforceState struct {
@@ -138,31 +128,16 @@ func (b *Bruteforce) GetState() BruteforceState {
 
 	now := time.Now()
 	var locks []LockInfo
-
-	for k, t := range b.byIP {
-		b.clean(t, now)
-		if t.failures > 0 {
-			locks = append(locks, LockInfo{
-				Key:          k,
-				Type:         "ip",
-				Failures:     t.failures,
-				LockoutUntil: t.lockoutUntil,
-				BackoffStep:  t.backoffStep,
-			})
+	collect := func(m map[string]*attemptTracker, typ string) {
+		for k, t := range m {
+			b.clean(t, now)
+			if t.failures > 0 {
+				locks = append(locks, LockInfo{Key: k, Type: typ, Failures: t.failures, LockoutUntil: t.lockoutUntil})
+			}
 		}
 	}
-	for k, t := range b.byUser {
-		b.clean(t, now)
-		if t.failures > 0 {
-			locks = append(locks, LockInfo{
-				Key:          k,
-				Type:         "username",
-				Failures:     t.failures,
-				LockoutUntil: t.lockoutUntil,
-				BackoffStep:  t.backoffStep,
-			})
-		}
-	}
+	collect(b.byIP, "ip")
+	collect(b.byUser, "username")
 
 	return BruteforceState{Config: b.cfg, Locks: locks}
 }
@@ -235,19 +210,9 @@ func (b *Bruteforce) computeLockout(step int) int {
 }
 
 func formatDuration(d time.Duration) string {
-	if d < time.Minute {
+	minutes := int(math.Ceil(d.Minutes()))
+	if minutes <= 1 {
 		return "less than a minute"
 	}
-	minutes := int(d.Minutes())
-	if minutes == 1 {
-		return "1 minute"
-	}
-	return formatInt(minutes) + " minutes"
-}
-
-func formatInt(n int) string {
-	if n < 10 {
-		return string(rune('0' + n))
-	}
-	return formatInt(n/10) + string(rune('0'+n%10))
+	return strconv.Itoa(minutes) + " minutes"
 }

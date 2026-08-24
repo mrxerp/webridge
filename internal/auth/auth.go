@@ -20,7 +20,7 @@ import (
 
 const cookieName = "pd_session"
 
-var ValidPerms = []string{"download", "dashboard", "audit", "users", "groups"}
+var ValidPerms = []string{"download", "audit", "users", "groups"}
 
 type user struct {
 	hash   []byte
@@ -268,7 +268,7 @@ func (s *Service) Login(auditLog *audit.Log) http.HandlerFunc {
 			SameSite: http.SameSiteLaxMode,
 			MaxAge:   int(s.ttl.Seconds()),
 		})
-		audit.WriteJSON(w, map[string]any{"username": req.Username, "role": u.role, "permissions": s.permsList(req.Username)})
+		audit.WriteJSON(w, map[string]any{"username": req.Username, "role": u.role, "permissions": s.permsList(req.Username), "all_perms": ValidPerms})
 	}
 }
 
@@ -296,6 +296,7 @@ func (s *Service) Me(w http.ResponseWriter, r *http.Request) {
 		"username":      username,
 		"role":          role,
 		"permissions":   s.permsList(username),
+		"all_perms":     ValidPerms,
 	})
 }
 

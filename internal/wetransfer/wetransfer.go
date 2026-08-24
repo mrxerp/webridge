@@ -29,14 +29,7 @@ type TransferInfo struct {
 	DirectURL string
 	FileName  string
 	FileSize  int64
-	Files     []FileInfo
-}
-
-type FileInfo struct {
-	ID       string
-	Name     string
-	Size     int64
-	MimeType string
+	FileCount int
 }
 
 type PasswordRequiredError struct{}
@@ -65,13 +58,9 @@ func NewClient(requestTimeout time.Duration, maxRedirects int) *Client {
 	}
 }
 
-// Matches reports whether rawURL points at a WeTransfer domain.
-func (c *Client) Matches(rawURL string) bool {
-	parsed, err := url.Parse(rawURL)
-	if err != nil {
-		return false
-	}
-	host := strings.ToLower(parsed.Host)
+// hostAllowed reports whether rawURL points at a WeTransfer domain.
+func hostAllowed(host string) bool {
+	host = strings.ToLower(host)
 	host, _, _ = strings.Cut(host, ":")
 	if strings.HasSuffix(host, ".") {
 		host = host[:len(host)-1]
@@ -80,18 +69,13 @@ func (c *Client) Matches(rawURL string) bool {
 		host == "we.tl" || strings.HasSuffix(host, ".we.tl")
 }
 
-func (c *Client) Resolve(ctx context.Context, inputURL string, auth map[string]string) (*TransferInfo, error) {
-	_, transferID, recipientID, securityHash, err := c.parseURL(ctx, inputURL)
+func (c *Client) Resolve(ctx context.Context, inputURL, password string) (*TransferInfo, error) {
+	transferID, recipientID, securityHash, err := c.parseURL(ctx, inputURL)
 	if err != nil {
 		return nil, err
 	}
 
-	password := ""
-	if auth != nil {
-		password = auth["password"]
-	}
-
-	directLink, fileName, fileSize, files, err := c.getDirectLink(ctx, transferID, recipientID, securityHash, password)
+	directLink, fileName, fileSize, fileCount, err := c.getDirectLink(ctx, transferID, recipientID, securityHash, password)
 	if err != nil {
 		return nil, err
 	}
@@ -100,19 +84,19 @@ func (c *Client) Resolve(ctx context.Context, inputURL string, auth map[string]s
 		DirectURL: directLink,
 		FileName:  fileName,
 		FileSize:  fileSize,
-		Files:     files,
+		FileCount: fileCount,
 	}, nil
 }
 
-func (c *Client) parseURL(ctx context.Context, inputURL string) (string, string, string, string, error) {
+func (c *Client) parseURL(ctx context.Context, inputURL string) (transferID, recipientID, securityHash string, err error) {
 	parsed, err := url.Parse(inputURL)
 	if err != nil {
-		return "", "", "", "", fmt.Errorf("invalid URL: %w", err)
+		return "", "", "", fmt.Errorf("invalid URL: %w", err)
 	}
 
-	host := strings.ToLower(parsed.Host)
-	if !strings.HasSuffix(host, "wetransfer.com") && host != "we.tl" {
-		return "", "", "", "", errors.New("domain not allowed: only wetransfer.com and we.tl are supported")
+	host := parsed.Host
+	if !hostAllowed(host) {
+		return "", "", "", errors.New("domain not allowed: only wetransfer.com and we.tl are supported")
 	}
 
 	path := parsed.Path
@@ -120,26 +104,26 @@ func (c *Client) parseURL(ctx context.Context, inputURL string) (string, string,
 	if shortURLRegex.MatchString(inputURL) {
 		matches := shortURLRegex.FindStringSubmatch(inputURL)
 		if len(matches) < 3 {
-			return "", "", "", "", errors.New("invalid short URL format")
+			return "", "", "", errors.New("invalid short URL format")
 		}
 		prefix := matches[1]
 		shortID := matches[2]
 		resolved, err := c.resolveShortURL(ctx, prefix+shortID)
 		if err != nil {
-			return "", "", "", "", err
+			return "", "", "", err
 		}
 		return c.parseURL(ctx, resolved)
 	}
 
 	if matches := fullURLPathRecRegex.FindStringSubmatch(path); len(matches) == 4 {
-		return inputURL, matches[1], matches[2], matches[3], nil
+		return matches[1], matches[2], matches[3], nil
 	}
 
 	if matches := fullURLPathRegex.FindStringSubmatch(path); len(matches) == 3 {
-		return inputURL, matches[1], "", matches[2], nil
+		return matches[1], "", matches[2], nil
 	}
 
-	return "", "", "", "", errors.New("unsupported WeTransfer URL format")
+	return "", "", "", errors.New("unsupported WeTransfer URL format")
 }
 
 func (c *Client) resolveShortURL(ctx context.Context, shortID string) (string, error) {
@@ -148,16 +132,6 @@ func (c *Client) resolveShortURL(ctx context.Context, shortID string) (string, e
 		return "", err
 	}
 	req.Header.Set("User-Agent", c.userAgent)
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
-	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
-	req.Header.Set("Connection", "keep-alive")
-	req.Header.Set("Upgrade-Insecure-Requests", "1")
-	req.Header.Set("Sec-Fetch-Dest", "document")
-	req.Header.Set("Sec-Fetch-Mode", "navigate")
-	req.Header.Set("Sec-Fetch-Site", "none")
-	req.Header.Set("Sec-Fetch-User", "?1")
-	req.Header.Set("Cache-Control", "max-age=0")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -177,7 +151,7 @@ func (c *Client) resolveShortURL(ctx context.Context, shortID string) (string, e
 	return location, nil
 }
 
-func (c *Client) getDirectLink(ctx context.Context, transferID, recipientID, securityHash, password string) (string, string, int64, []FileInfo, error) {
+func (c *Client) getDirectLink(ctx context.Context, transferID, recipientID, securityHash, password string) (string, string, int64, int, error) {
 	apiURL := apiBaseURL + "/" + transferID + downloadEndpoint
 
 	body := map[string]any{
@@ -195,7 +169,7 @@ func (c *Client) getDirectLink(ctx context.Context, transferID, recipientID, sec
 
 	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, strings.NewReader(string(jsonBody)))
 	if err != nil {
-		return "", "", 0, nil, err
+		return "", "", 0, 0, err
 	}
 	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Content-Type", "application/json")
@@ -203,7 +177,7 @@ func (c *Client) getDirectLink(ctx context.Context, transferID, recipientID, sec
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", "", 0, nil, fmt.Errorf("API request failed: %w", err)
+		return "", "", 0, 0, fmt.Errorf("API request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -213,9 +187,9 @@ func (c *Client) getDirectLink(ctx context.Context, transferID, recipientID, sec
 		}
 		json.NewDecoder(resp.Body).Decode(&apiErr)
 		if apiErr.Message == "invalid_transfer_password" {
-			return "", "", 0, nil, &PasswordRequiredError{}
+			return "", "", 0, 0, &PasswordRequiredError{}
 		}
-		return "", "", 0, nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, apiErr.Message)
+		return "", "", 0, 0, fmt.Errorf("API returned status %d: %s", resp.StatusCode, apiErr.Message)
 	}
 
 	var result struct {
@@ -229,30 +203,24 @@ func (c *Client) getDirectLink(ctx context.Context, transferID, recipientID, sec
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", "", 0, nil, fmt.Errorf("failed to parse API response: %w", err)
+		return "", "", 0, 0, fmt.Errorf("failed to parse API response: %w", err)
 	}
 
 	if result.DirectLink == "" {
-		return "", "", 0, nil, errors.New("no direct_link in API response")
+		return "", "", 0, 0, errors.New("no direct_link in API response")
 	}
 
 	fileName := extractFileName(result.DirectLink)
 	var fileSize int64
-	files := make([]FileInfo, len(result.Files))
-	for i, f := range result.Files {
-		files[i] = FileInfo{
-			ID:       f.ID,
-			Name:     f.Name,
-			Size:     f.Size,
-			MimeType: f.MimeType,
-		}
+	fileCount := len(result.Files)
+	for _, f := range result.Files {
 		fileSize += f.Size
 	}
 	if fileSize == 0 {
 		fileSize = -1
 	}
 
-	return result.DirectLink, fileName, fileSize, files, nil
+	return result.DirectLink, fileName, fileSize, fileCount, nil
 }
 
 func (c *Client) Stream(ctx context.Context, info *TransferInfo, w http.ResponseWriter) (int64, error) {
@@ -260,7 +228,8 @@ func (c *Client) Stream(ctx context.Context, info *TransferInfo, w http.Response
 	const baseBackoff = 2 * time.Second
 	buf := make([]byte, 32*1024)
 
-	for attempt := 0; attempt <= maxRetries; attempt++ {
+	attempt := 0
+	for {
 		req, err := http.NewRequestWithContext(ctx, "GET", info.DirectURL, nil)
 		if err != nil {
 			return 0, err
@@ -277,6 +246,7 @@ func (c *Client) Stream(ctx context.Context, info *TransferInfo, w http.Response
 				return 0, ctx.Err()
 			case <-time.After(baseBackoff * time.Duration(attempt+1)):
 			}
+			attempt++
 			continue
 		}
 
@@ -293,14 +263,13 @@ func (c *Client) Stream(ctx context.Context, info *TransferInfo, w http.Response
 		resp.Body.Close()
 
 		if err != nil {
-			if errors.Is(err, context.Canceled) || isClosedConnection(err) {
+			if IsClientDisconnect(err) {
 				return n, nil
 			}
 			return n, err
 		}
 		return n, nil
 	}
-	return 0, nil
 }
 
 func extractFileName(directURL string) string {
@@ -315,12 +284,18 @@ func extractFileName(directURL string) string {
 	return "download"
 }
 
-func isClosedConnection(err error) bool {
+// IsClientDisconnect reports whether err is the client hanging up or
+// cancelling, which is not a download failure.
+func IsClientDisconnect(err error) bool {
 	if err == nil {
 		return false
 	}
+	if errors.Is(err, context.Canceled) {
+		return true
+	}
 	errStr := err.Error()
-	return strings.Contains(errStr, "broken pipe") ||
+	return strings.Contains(errStr, "context canceled") ||
+		strings.Contains(errStr, "broken pipe") ||
 		strings.Contains(errStr, "connection reset") ||
 		strings.Contains(errStr, "connection closed") ||
 		strings.Contains(errStr, "use of closed network connection")

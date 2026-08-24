@@ -54,13 +54,6 @@ func (h *DownloadHandler) urlParamOr400(w http.ResponseWriter, r *http.Request) 
 	return url
 }
 
-func passwordAuth(r *http.Request) map[string]string {
-	if pw := r.URL.Query().Get("password"); pw != "" {
-		return map[string]string{"password": pw}
-	}
-	return nil
-}
-
 func isShortWeTransferURL(u string) bool {
 	return strings.HasPrefix(u, "https://we.tl/") || strings.HasPrefix(u, "http://we.tl/")
 }
@@ -95,13 +88,7 @@ func (h *DownloadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	username := auth.Username(r.Context())
 	h.audit.StartDownload()
 
-	if !h.wt.Matches(urlParam) {
-		h.logDownload(username, clientIP, urlParam, "", 0, 0, time.Since(start), "error", "unsupported provider", "")
-		http.Error(w, "Unsupported URL. Only WeTransfer links are supported.", http.StatusBadRequest)
-		return
-	}
-
-	info, err := h.wt.Resolve(ctx, urlParam, passwordAuth(r))
+	info, err := h.wt.Resolve(ctx, urlParam, r.URL.Query().Get("password"))
 	if err != nil {
 		h.logDownload(username, clientIP, urlParam, "", 0, 0, time.Since(start), "error", err.Error(), "")
 		var pwErr *wetransfer.PasswordRequiredError
@@ -145,7 +132,7 @@ func (h *DownloadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	bytesWritten, err := h.wt.Stream(ctx, info, streamW)
 	if err != nil {
-		if !isClientDisconnect(err) {
+		if !wetransfer.IsClientDisconnect(err) {
 			h.logger.Error("stream error", "error", err, "url", urlParam)
 		}
 		h.logDownload(username, clientIP, urlParam, info.FileName, info.FileSize, bytesWritten, time.Since(start), "error", err.Error(), hashHex)
@@ -212,18 +199,6 @@ func sanitizeFilename(name string) string {
 	return name
 }
 
-func isClientDisconnect(err error) bool {
-	if err == nil {
-		return false
-	}
-	errStr := err.Error()
-	return strings.Contains(errStr, "context canceled") ||
-		strings.Contains(errStr, "broken pipe") ||
-		strings.Contains(errStr, "connection reset") ||
-		strings.Contains(errStr, "connection closed") ||
-		strings.Contains(errStr, "use of closed network connection")
-}
-
 func (h *DownloadHandler) InfoHandler(w http.ResponseWriter, r *http.Request) {
 	urlParam := h.urlParamOr400(w, r)
 	if urlParam == "" {
@@ -231,15 +206,11 @@ func (h *DownloadHandler) InfoHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	if !h.wt.Matches(urlParam) {
-		http.Error(w, "Unsupported URL. Only WeTransfer links are supported.", http.StatusBadRequest)
-		return
-	}
 	h.audit.Add("info_check", auth.Username(ctx), middleware.ClientIP(r), urlParam)
 
 	isShortURL := isShortWeTransferURL(urlParam)
 
-	info, err := h.wt.Resolve(ctx, urlParam, passwordAuth(r))
+	info, err := h.wt.Resolve(ctx, urlParam, r.URL.Query().Get("password"))
 	if err != nil {
 		var pwErr *wetransfer.PasswordRequiredError
 		if errors.As(err, &pwErr) {
@@ -267,8 +238,7 @@ func (h *DownloadHandler) InfoHandler(w http.ResponseWriter, r *http.Request) {
 		"filename":   info.FileName,
 		"size":       info.FileSize,
 		"size_human": audit.FormatBytes(info.FileSize),
-		"file_count": len(info.Files),
-		"files":      info.Files,
+		"file_count": info.FileCount,
 	}
 
 	audit.WriteJSON(w, resp)
@@ -277,13 +247,11 @@ func (h *DownloadHandler) InfoHandler(w http.ResponseWriter, r *http.Request) {
 type hashWriter struct {
 	http.ResponseWriter
 	h hash.Hash
-	n int64
 }
 
 func (hw *hashWriter) Write(p []byte) (int, error) {
 	n, err := hw.ResponseWriter.Write(p)
 	hw.h.Write(p[:n])
-	hw.n += int64(n)
 	return n, err
 }
 

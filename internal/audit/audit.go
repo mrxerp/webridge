@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -72,15 +71,11 @@ func New(maxEvents int) *Log {
 }
 
 // NewWithStore creates a Log backed by a persistent SQLite store.
-func NewWithStore(maxEvents int, store *Store) *Log {
+func NewWithStore(maxEvents int, store *Store, anomalyCfg AnomalyConfig) *Log {
 	l := New(maxEvents)
 	l.store = store
+	l.cfg = anomalyCfg
 	return l
-}
-
-// SetAnomalyConfig enables anomaly flag computation on events.
-func (l *Log) SetAnomalyConfig(cfg AnomalyConfig) {
-	l.cfg = cfg
 }
 
 func (l *Log) Add(action, user, ip, detail string) {
@@ -169,51 +164,18 @@ type Query struct {
 }
 
 func (l *Log) Query(q Query) []Event {
-	if l.store != nil {
-		return l.store.Query(q)
+	if l.store == nil {
+		return nil
 	}
-	return l.queryMemory(q)
+	return l.store.Query(q)
 }
 
 // Count returns how many events match the query's filters (ignores Limit/Offset).
 func (l *Log) Count(q Query) int64 {
-	if l.store != nil {
-		return l.store.Count(q)
+	if l.store == nil {
+		return 0
 	}
-	return int64(len(l.queryMemory(Query{Action: q.Action, User: q.User, FromMs: q.FromMs, ToMs: q.ToMs})))
-}
-
-func (l *Log) queryMemory(q Query) []Event {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	limit := q.Limit
-	if limit <= 0 || limit > len(l.events) {
-		limit = len(l.events)
-	}
-	out := make([]Event, 0, limit)
-	skipped := 0
-	for i := len(l.events) - 1; i >= 0 && len(out) < limit; i-- {
-		e := l.events[i]
-		if q.Action != "" && e.Action != q.Action {
-			continue
-		}
-		if q.User != "" && !strings.Contains(strings.ToLower(e.User), strings.ToLower(q.User)) {
-			continue
-		}
-		ms := e.Time.UnixMilli()
-		if q.FromMs > 0 && ms < q.FromMs {
-			continue
-		}
-		if q.ToMs > 0 && ms > q.ToMs {
-			continue
-		}
-		if skipped < q.Offset {
-			skipped++
-			continue
-		}
-		out = append(out, e)
-	}
-	return out
+	return l.store.Count(q)
 }
 
 func (l *Log) StartDownload() { l.active.Add(1) }

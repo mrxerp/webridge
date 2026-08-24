@@ -47,8 +47,7 @@ func main() {
 		logger.Info("audit store ready", "db", cfg.Audit.DBPath, "retention_days", cfg.Audit.RetentionDays)
 	}
 
-	auditLog := audit.NewWithStore(5000, auditStore)
-	auditLog.SetAnomalyConfig(audit.AnomalyConfig{
+	auditLog := audit.NewWithStore(5000, auditStore, audit.AnomalyConfig{
 		OffHoursStart:      cfg.Audit.OffHoursStart,
 		OffHoursEnd:        cfg.Audit.OffHoursEnd,
 		BulkDownloadCount:  cfg.Audit.BulkDownloadCount,
@@ -70,7 +69,6 @@ func main() {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", handlers.Healthz)
-	mux.HandleFunc("GET /readyz", handlers.Readyz)
 
 	guard := func(perm string, h http.Handler) http.Handler {
 		return authSvc.RequireAuth(authSvc.RequirePerm(perm)(h))
@@ -85,7 +83,7 @@ func main() {
 	mux.Handle("GET /api/v1/info", guard("download", http.HandlerFunc(downloadHandler.InfoHandler)))
 	mux.Handle("GET /api/v1/download", guard("download", http.HandlerFunc(downloadHandler.ServeHTTP)))
 
-	mux.Handle("GET /api/v1/admin/metrics", guard("dashboard", http.HandlerFunc(auditLog.MetricsHandler)))
+	mux.Handle("GET /api/v1/admin/metrics", guard("audit", http.HandlerFunc(auditLog.MetricsHandler)))
 	mux.Handle("GET /api/v1/admin/audit", guard("audit", http.HandlerFunc(auditLog.EventsHandler)))
 	mux.Handle("GET /api/v1/admin/audit/export", guard("audit", http.HandlerFunc(auditLog.ExportCSVHandler)))
 	mux.Handle("POST /api/v1/audit/log", authSvc.RequireAuth(http.HandlerFunc(auditLog.LogClientEvent)))

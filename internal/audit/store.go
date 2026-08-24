@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sync/atomic"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -42,7 +41,6 @@ CREATE INDEX IF NOT EXISTS idx_ae_user ON audit_events(user);
 type Store struct {
 	db      *sql.DB
 	ch      chan Event
-	dropped atomic.Int64
 	logger  *slog.Logger
 	done    chan struct{}
 }
@@ -79,7 +77,7 @@ func (s *Store) enqueue(e Event) {
 	select {
 	case s.ch <- e:
 	default:
-		s.dropped.Add(1)
+		s.logger.Warn("audit buffer full, event dropped", "action", e.Action)
 	}
 }
 
@@ -116,7 +114,6 @@ func (s *Store) drain(batch []Event) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		s.logger.Error("audit store: begin tx", "err", err, "dropped", len(batch))
-		s.dropped.Add(int64(len(batch)))
 		return
 	}
 	stmt, err := tx.Prepare(`INSERT INTO audit_events
@@ -126,7 +123,6 @@ func (s *Store) drain(batch []Event) {
 	if err != nil {
 		tx.Rollback()
 		s.logger.Error("audit store: prepare", "err", err, "dropped", len(batch))
-		s.dropped.Add(int64(len(batch)))
 		return
 	}
 	defer stmt.Close()
@@ -139,7 +135,6 @@ func (s *Store) drain(batch []Event) {
 	}
 	if err := tx.Commit(); err != nil {
 		s.logger.Error("audit store: commit", "err", err, "dropped", len(batch))
-		s.dropped.Add(int64(len(batch)))
 	}
 }
 
@@ -239,9 +234,4 @@ func (s *Store) Count(q Query) int64 {
 	var n int64
 	s.db.QueryRow("SELECT COUNT(*) FROM audit_events WHERE "+where, args...).Scan(&n)
 	return n
-}
-
-// Dropped returns the number of events lost due to full buffer.
-func (s *Store) Dropped() int64 {
-	return s.dropped.Load()
 }

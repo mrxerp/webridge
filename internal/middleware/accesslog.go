@@ -3,7 +3,6 @@ package middleware
 import (
 	"encoding/json"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -18,7 +17,6 @@ type accessEntry struct {
 	Status    int    `json:"status"`
 	Duration  int64  `json:"duration_ms"`
 	IP        string `json:"ip"`
-	User      string `json:"user,omitempty"`
 	Bytes     int64  `json:"bytes_sent"`
 	UserAgent string `json:"user_agent"`
 }
@@ -34,16 +32,13 @@ func AccessLog(dir string, logger *slog.Logger) func(http.Handler) http.Handler 
 			start := time.Now()
 			ww := &responseWriter{ResponseWriter: rw, statusCode: http.StatusOK}
 			next.ServeHTTP(ww, r)
-			user := r.Context().Value("username")
-			userStr, _ := user.(string)
 			w.write(accessEntry{
 				Time:      start.Format(time.RFC3339Nano),
 				Method:    r.Method,
 				Path:      r.URL.Path,
 				Status:    ww.statusCode,
 				Duration:  time.Since(start).Milliseconds(),
-				IP:        clientIP(r),
-				User:      userStr,
+				IP:        ClientIP(r),
 				Bytes:     ww.bytes,
 				UserAgent: r.UserAgent(),
 			})
@@ -58,13 +53,11 @@ type jsonlWriter struct {
 	file   *os.File
 	date   string
 	ch     chan accessEntry
-	done   chan struct{}
 }
 
 func (w *jsonlWriter) write(e accessEntry) {
 	if w.ch == nil {
 		w.ch = make(chan accessEntry, 10000)
-		w.done = make(chan struct{})
 		go w.flusher()
 	}
 	select {
@@ -74,7 +67,6 @@ func (w *jsonlWriter) write(e accessEntry) {
 }
 
 func (w *jsonlWriter) flusher() {
-	defer close(w.done)
 	for e := range w.ch {
 		w.append(e)
 	}
@@ -103,18 +95,4 @@ func (w *jsonlWriter) append(e accessEntry) {
 	data = append(data, '\n')
 	w.file.Write(data)
 	w.mu.Unlock()
-}
-
-func clientIP(r *http.Request) string {
-	if ip := r.Header.Get("X-Forwarded-For"); ip != "" {
-		return ip
-	}
-	if ip := r.Header.Get("X-Real-Ip"); ip != "" {
-		return ip
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
 }

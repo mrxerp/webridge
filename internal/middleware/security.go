@@ -18,52 +18,29 @@ func SecurityHeaders(next http.Handler) http.Handler {
 	})
 }
 
+// ValidateURL is defense-in-depth only: handlers already enforce the
+// wetransfer.com/we.tl allowlist, this just rejects private-IP literals.
 func ValidateURL(next http.Handler) http.Handler {
-	allowedDomains := []string{
-		"wetransfer.com",
-		"we.tl",
-	}
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		urlParam := r.URL.Query().Get("url")
 		if urlParam == "" {
 			next.ServeHTTP(w, r)
 			return
 		}
-
-		parsed, err := parseURL(urlParam)
-		if err != nil {
-			http.Error(w, "Invalid URL", http.StatusBadRequest)
-			return
-		}
-
-		host := strings.ToLower(parsed.Host)
-		allowed := false
-		for _, d := range allowedDomains {
-			if host == d || strings.HasSuffix(host, "."+d) {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			http.Error(w, "Domain not allowed", http.StatusForbidden)
-			return
-		}
-
-		if isPrivateIP(host) {
+		if isPrivateIP(hostOf(urlParam)) {
 			http.Error(w, "Private IP addresses not allowed", http.StatusForbidden)
 			return
 		}
-
 		next.ServeHTTP(w, r)
 	})
 }
 
-func parseURL(rawURL string) (*url.URL, error) {
-	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") {
-		rawURL = "https://" + rawURL
+func hostOf(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
 	}
-	return url.Parse(rawURL)
+	return parsed.Host
 }
 
 func isPrivateIP(host string) bool {
