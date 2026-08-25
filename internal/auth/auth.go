@@ -48,22 +48,24 @@ const (
 )
 
 type Service struct {
-	users    map[string]user
-	groups   map[string]group
-	mu       sync.Mutex
-	sessions map[string]session
-	ttl      time.Duration
-	logger   *slog.Logger
-	ldapCfg  config.LDAPConfig // guarded by mu
-	ldapFile string
-	imapCfg  config.IMAPEmailConfig // guarded by mu
-	imapFile string
-	bf       *Bruteforce
+	users      map[string]user
+	groups     map[string]group
+	mu         sync.Mutex
+	sessions   map[string]session
+	ttl        time.Duration
+	logger     *slog.Logger
+	ldapCfg    config.LDAPConfig      // guarded by mu
+	ldapFile   string
+	imapCfg    config.IMAPEmailConfig // guarded by mu
+	imapFile   string
+	configFile string                 // path to config.yaml for dual-write
+	bf         *Bruteforce
 }
 
 // ponytail: SHA-256+salt instead of bcrypt to avoid a new dep; fine for a small self-hosted tool, swap for golang.org/x/crypto/bcrypt if this ever faces real attackers
 // ldapFile/imapFile: JSON overrides edited from the admin UI; empty path disables persistence.
-func New(cfg *config.Config, logger *slog.Logger, ldapFile, imapFile string) *Service {
+// configFile: path to config.yaml for dual-write persistence.
+func New(cfg *config.Config, logger *slog.Logger, ldapFile, imapFile, configFile string) *Service {
 	authCfg := cfg.Auth
 	ttl := time.Duration(authCfg.SessionTTL)
 	if ttl <= 0 {
@@ -75,14 +77,15 @@ func New(cfg *config.Config, logger *slog.Logger, ldapFile, imapFile string) *Se
 			"users": {permissions: []string{"download"}},
 			"admin": {permissions: append([]string(nil), ValidPerms...)},
 		},
-		sessions: make(map[string]session),
-		ttl:      ttl,
-		logger:   logger,
-		ldapCfg:  cfg.LDAP,
-		ldapFile: ldapFile,
-		imapCfg:  cfg.IMAP,
-		imapFile: imapFile,
-		bf:       NewBruteforce(cfg.Auth.LoginRateLimit),
+		sessions:   make(map[string]session),
+		ttl:        ttl,
+		logger:     logger,
+		ldapCfg:    cfg.LDAP,
+		ldapFile:   ldapFile,
+		imapCfg:    cfg.IMAP,
+		imapFile:   imapFile,
+		configFile: configFile,
+		bf:         NewBruteforce(cfg.Auth.LoginRateLimit),
 	}
 	if data, err := os.ReadFile(ldapFile); err == nil {
 		var ov config.LDAPConfig
@@ -230,7 +233,6 @@ func (s *Service) Login(auditLog *audit.Log) http.HandlerFunc {
 				s.logger.Warn("imap auth failed", "username", req.Username, "error", ierr)
 			}
 		}
-		auditLog.Login(ok)
 		if !ok {
 			s.bf.RecordFailure(ip, req.Username)
 			auditLog.Add("login_failed", req.Username, ip, "")

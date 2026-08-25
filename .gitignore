@@ -1,6 +1,8 @@
 bin/
 *.log
 .env
+cookies.txt
 ldap-settings.json
-deploy/docker/config.yaml
+imap-settings.json
+config/
 data/

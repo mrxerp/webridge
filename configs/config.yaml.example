@@ -11,14 +11,9 @@ wetransfer:
   max_redirects: 10
 
 audit:
-  db_path: "data/audit.db"
+  db_path: "/app/config/data/audit.db"
   retention_days: 90
-  access_log_dir: "data/logs"
-  off_hours_start: 22
-  off_hours_end: 6
-  bulk_download_count: 10
-  bulk_download_window_minutes: 5
-  anomaly_max_file_size_gb: 10
+  access_log_dir: "/app/config/data/logs"
 
 limits:
   max_concurrent_downloads: 50

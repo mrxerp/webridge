@@ -29,7 +29,7 @@ func TestProvisionIMAP(t *testing.T) {
 	s := New(&config.Config{
 		Auth: config.AuthConfig{Users: []config.UserConfig{{Username: "admin", Password: "x", Role: "admin"}}},
 		IMAP: config.IMAPEmailConfig{DefaultGroups: []string{"users"}},
-	}, nil, "", "")
+	}, nil, "", "", "")
 
 	if _, err := s.provisionIMAP("bob@example.com"); err == nil {
 		t.Fatal("expected error when auto_provision is off")

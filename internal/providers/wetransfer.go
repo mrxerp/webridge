@@ -63,21 +63,10 @@ func (c *WeTransferClient) parseURL(ctx context.Context, inputURL string) (trans
 		return "", "", "", fmt.Errorf("invalid URL: %w", err)
 	}
 
-	host := parsed.Host
-	if !hostAllowed(host) {
-		return "", "", "", errors.New("domain not allowed: only wetransfer.com and we.tl are supported")
-	}
-
 	path := parsed.Path
 
 	if wtShortURLRegex.MatchString(inputURL) {
-		matches := wtShortURLRegex.FindStringSubmatch(inputURL)
-		if len(matches) < 3 {
-			return "", "", "", errors.New("invalid short URL format")
-		}
-		prefix := matches[1]
-		shortID := matches[2]
-		resolved, err := c.resolveShortURL(ctx, prefix+shortID)
+		resolved, err := c.resolveShortURL(ctx, inputURL)
 		if err != nil {
 			return "", "", "", err
 		}
@@ -135,7 +124,7 @@ func (c *WeTransferClient) getDirectLink(ctx context.Context, transferID, recipi
 		apiURL += "?security_hash=" + securityHash
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, strings.NewReader(`{"intent":"entire_transfer"}`))
 	if err != nil {
 		return "", "", 0, 0, err
 	}
@@ -191,14 +180,4 @@ func extractFileName(directURL string) string {
 		return name
 	}
 	return "download"
-}
-
-func hostAllowed(host string) bool {
-	host = strings.ToLower(host)
-	host, _, _ = strings.Cut(host, ":")
-	if strings.HasSuffix(host, ".") {
-		host = host[:len(host)-1]
-	}
-	return host == "wetransfer.com" || strings.HasSuffix(host, ".wetransfer.com") ||
-		host == "we.tl" || strings.HasSuffix(host, ".we.tl")
 }

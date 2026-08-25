@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -130,7 +131,9 @@ func (h *DownloadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", info.FileSize))
 	}
 
+	h.audit.StartDownload()
 	n, err := provider.Stream(ctx, info, w)
+	h.audit.EndDownload(err == nil, n)
 	h.logDownload(username, clientIP, urlParam, provider.Name(), info, n, err, time.Since(start))
 }
 
@@ -284,4 +287,10 @@ func (h *DownloadHandler) logDownload(username, clientIP, urlParam, providerName
 		SHA256:           sha256Sum,
 		ClientUA:         "",
 	})
+}
+
+func (h *DownloadHandler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
+	names := h.providers.GetProviderNames()
+	sort.Strings(names)
+	audit.WriteJSON(w, map[string]any{"providers": names})
 }

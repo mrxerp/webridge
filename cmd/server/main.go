@@ -79,15 +79,21 @@ func main() {
 	}
 
 	auditLog := audit.NewWithStore(5000, auditStore)
+	configDir := filepath.Dir(*configPath)
+
 	ldapFile := os.Getenv("LDAP_SETTINGS_FILE")
 	if ldapFile == "" {
-		ldapFile = filepath.Join(filepath.Dir(*configPath), "ldap-settings.json")
+		ldapFile = filepath.Join(configDir, "ldap-settings.json")
 	}
 	imapFile := os.Getenv("IMAP_SETTINGS_FILE")
 	if imapFile == "" {
-		imapFile = filepath.Join(filepath.Dir(*configPath), "imap-settings.json")
+		imapFile = filepath.Join(configDir, "imap-settings.json")
 	}
-	authSvc := auth.New(cfg, logger, ldapFile, imapFile)
+	configFile := os.Getenv("CONFIG_PATH")
+	if configFile == "" {
+		configFile = *configPath
+	}
+	authSvc := auth.New(cfg, logger, ldapFile, imapFile, configFile)
 	downloadHandler := handlers.NewDownloadHandler(cfg, logger, auditLog, providerRegistry)
 	uiHandler := handlers.UIHandler(cfg)
 
@@ -107,6 +113,7 @@ func main() {
 
 	mux.Handle("GET /api/v1/info", guard("download", http.HandlerFunc(downloadHandler.InfoHandler)))
 	mux.Handle("GET /api/v1/download", guard("download", http.HandlerFunc(downloadHandler.ServeHTTP)))
+	mux.Handle("GET /api/v1/providers", authSvc.RequireAuth(http.HandlerFunc(downloadHandler.ProvidersHandler)))
 
 	mux.Handle("GET /api/v1/admin/metrics", guard("audit", http.HandlerFunc(auditLog.MetricsHandler)))
 	mux.Handle("GET /api/v1/admin/audit", guard("audit", http.HandlerFunc(auditLog.EventsHandler)))

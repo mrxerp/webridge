@@ -53,6 +53,7 @@
         filterAction: document.getElementById('filterAction'),
         filterUser: document.getElementById('filterUser'),
         filterFrom: document.getElementById('filterFrom'),
+        supportedHint: document.getElementById('supportedHint'),
         filterTo: document.getElementById('filterTo'),
         clearFiltersBtn: document.getElementById('clearFiltersBtn'),
         newGroupPerms: document.getElementById('newGroupPerms'),
@@ -236,6 +237,18 @@
         elements.userMenu.hidden = true;
         switchTab('download');
         elements.urlInput.focus();
+        loadProviders();
+    }
+
+    async function loadProviders() {
+        try {
+            const res = await fetch(`${API_BASE}/providers`);
+            if (!res.ok) return;
+            const { providers } = await res.json();
+            if (providers && providers.length) {
+                elements.supportedHint.textContent = 'Supported: ' + providers.join(', ');
+            }
+        } catch {}
     }
 
     async function onLoginSubmit(e) {
@@ -359,10 +372,14 @@
 
     async function loadUsersData() {
         try {
-            const res = await fetch(`${API_BASE}/admin/users`);
-            if (!res.ok) return;
-            const { users } = await res.json();
-            renderUsers(users || []);
+            const [usersRes, groupsRes] = await Promise.all([
+                fetch(`${API_BASE}/admin/users`),
+                fetch(`${API_BASE}/admin/groups`)
+            ]);
+            if (!usersRes.ok || !groupsRes.ok) return;
+            const { users } = await usersRes.json();
+            const { groups } = await groupsRes.json();
+            renderUsers(users || [], groups || []);
         } catch {}
         loadLdapStatus();
         loadImapStatus();
@@ -519,14 +536,20 @@
         } catch {}
     }
 
-    function renderUsers(users) {
+    function renderUsers(users, groups) {
         elements.usersBody.textContent = '';
         if (!users.length) {
             emptyRow(elements.usersBody, 5, 'No users.');
             return;
         }
+        
+        // Build group name list for checkboxes
+        const groupNames = (groups || []).map(g => g.name).sort();
+        
         for (const u of users) {
             const tr = document.createElement('tr');
+            const isExternal = u.source && u.source !== 'local';
+            const userGroups = u.groups || [];
 
             const tdName = document.createElement('td');
             tdName.textContent = u.username;
@@ -534,7 +557,7 @@
 
             const tdSource = document.createElement('td');
             tdSource.textContent = u.source || 'local';
-            if (u.source && u.source !== 'local') tdSource.className = 'source-ext';
+            if (isExternal) tdSource.className = 'source-ext';
             tr.appendChild(tdSource);
 
             const tdRole = document.createElement('td');
@@ -551,20 +574,33 @@
             tdRole.appendChild(roleSel);
             tr.appendChild(tdRole);
 
+            // Groups as checkboxes
             const tdGroups = document.createElement('td');
-            const groupsInput = document.createElement('input');
-            groupsInput.type = 'text';
-            groupsInput.className = 'row-input';
-            groupsInput.value = (u.groups || []).join(', ');
-            groupsInput.placeholder = 'none';
-            groupsInput.addEventListener('change', () => updateUser(u.username, {
-                groups: groupsInput.value.split(',').map(s => s.trim()).filter(Boolean)
-            }));
-            tdGroups.appendChild(groupsInput);
+            tdGroups.className = 'groups-cell';
+            if (groupNames.length === 0) {
+                tdGroups.textContent = '—';
+            } else {
+                for (const gName of groupNames) {
+                    const label = document.createElement('label');
+                    label.className = 'group-checkbox-label';
+                    const cb = document.createElement('input');
+                    cb.type = 'checkbox';
+                    cb.value = gName;
+                    cb.checked = userGroups.includes(gName);
+                    cb.disabled = isExternal; // LDAP/IMAP users get groups from external config
+                    cb.addEventListener('change', () => {
+                        const selected = Array.from(tdGroups.querySelectorAll('input:checked')).map(i => i.value);
+                        updateUser(u.username, { groups: selected });
+                    });
+                    label.appendChild(cb);
+                    label.appendChild(document.createTextNode(' ' + gName));
+                    tdGroups.appendChild(label);
+                }
+            }
             tr.appendChild(tdGroups);
 
             const tdActions = document.createElement('td');
-            if (!u.source || u.source === 'local') {
+            if (!isExternal) {
                 const pwBtn = document.createElement('button');
                 pwBtn.className = 'btn btn-small';
                 pwBtn.textContent = 'Password';

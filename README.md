@@ -1,19 +1,17 @@
 # WeBridge
 
-A self-hosted, all-round file downloader portal. Paste a link from any supported sharing service and download the file straight through your own server — no direct internet access needed for users, no files stored on disk.
-
-**Vision:** one downloader for everything. WeTransfer works today; new sources plug in behind a tiny `Matches / Resolve / Stream` interface, so Google Drive, Dropbox, pCloud and friends are a matter of adding one client — the auth, UI, limits and auditing around them stay the same.
+A self-hosted file downloader portal. Paste a link from any supported sharing service and download the file straight through your server — no direct internet access needed for users, no files stored on disk.
 
 ## Features
 
-- **Multi-source by design**: providers self-declare which URLs they handle (`Matches`); the rest of the system never cares where the file came from
+- **Multi-source by design**: providers self-declare which URLs they handle; the rest of the system never cares where the file came from
 - **Zero-disk streaming**: bytes flow source CDN → your server → user, nothing touches disk
 - **Web UI**: paste URL → click download; per-user Recent list with one-click retry
 - **Accounts & RBAC**: local users, LDAP/AD SSO, or org-email (IMAP); groups grant permissions (`download`, `audit`, `users`, `groups`); admin role = full access
 - **Admin console**: download stats, live audit log, user/group management, LDAP + IMAP settings editable in the UI (no restart)
 - **Resilient**: retries, resume via Range headers
 - **Dockerized**: single multi-stage image (~20MB), non-root user
-- **Observable**: JSON logging, health checks, in-app audit trail
+- **Observable**: JSON logging, health checks, in-app audit trail with SQLite persistence
 - **Secure**: domain allowlist, SSRF protection, rate limiting, security headers
 
 ## Quick Start
@@ -21,28 +19,44 @@ A self-hosted, all-round file downloader portal. Paste a link from any supported
 ### Docker (Recommended)
 
 ```bash
-cp configs/config.yaml.example config.yaml    # optional; sane defaults apply without it
-docker compose -f deploy/docker/compose.yaml up -d
+# Create config directory and copy example
+mkdir -p config
+cp configs/config.yaml.example config/config.yaml
 
-# Or manually
-docker build -t webridge -f deploy/docker/Dockerfile .
-docker run -p 8080:8080 -v $(pwd)/config.yaml:/app/config.yaml webridge
+# Start with docker compose (single volume mount for all persistent data)
+docker compose -f deploy/docker/compose.yaml up -d
 ```
 
-Compose mounts `./config.yaml` from your current directory (read-only) and persists UI-edited LDAP settings in `./data/`. See [Configuration](#configuration) below — `PROXY_*` env vars override the file. Users, groups and LDAP can also be managed live in the admin UI.
-
-Default login: `admin` / `admin123` — change it immediately.
+**Default login**: `admin` / `admin123` — change it immediately.
 
 ### Local Development
 
 ```bash
-make build
-./bin/webridge -config configs/config.yaml.example
+go build -o webridge ./cmd/server
+./webridge -config configs/config.yaml.example
 ```
 
 ## Configuration
 
-Copy `configs/config.yaml.example` to `config.yaml` and adjust:
+### Directory Structure (Docker)
+
+```
+/app/
+├── webridge                 # binary
+└── config/
+    ├── config.yaml          # main config (edit this)
+    ├── ldap-settings.json   # LDAP settings (managed by UI)
+    ├── imap-settings.json   # IMAP settings (managed by UI)
+    └── data/
+        ├── audit.db         # SQLite audit database
+        └── logs/            # daily access logs (JSONL)
+```
+
+Mount a single volume: `-v ./config:/app/config`
+
+### Config File (`config/config.yaml`)
+
+Copy `configs/config.yaml.example` to `config/config.yaml` and adjust:
 
 ```yaml
 server:
@@ -71,9 +85,34 @@ logging:
 
 ui:
   title: "WeBridge"
+
+audit:
+  db_path: "/app/config/data/audit.db"
+  retention_days: 90
+  access_log_dir: "/app/config/data/logs"
 ```
 
-LDAP/AD login is optional — configure it in the file (`ldap:` section) or live in the admin UI. Environment variables override config (prefix `PROXY_`, e.g. `PROXY_SERVER_PORT=8080`). `LDAP_SETTINGS_FILE` sets where UI-edited LDAP settings persist.
+### Environment Variables (override config)
+
+All `PROXY_*` vars override the YAML. Common ones:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PROXY_SERVER_PORT` | 8080 | Listen port |
+| `PROXY_LOGGING_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+| `PROXY_AUDIT_DB_PATH` | `/app/config/data/audit.db` | SQLite path |
+| `PROXY_AUDIT_ACCESS_LOG_DIR` | `/app/config/data/logs` | Access log dir |
+| `LDAP_SETTINGS_FILE` | `/app/config/ldap-settings.json` | LDAP settings file |
+| `IMAP_SETTINGS_FILE` | `/app/config/imap-settings.json` | IMAP settings file |
+| `CONFIG_PATH` | `/app/config/config.yaml` | Main config path |
+
+### LDAP / SSO
+
+Optional — configure in the file (`ldap:` section) or live in the admin UI (Settings → LDAP). Users authenticate against the directory on first login, then are auto-added as local users (source: `ldap`) so you can assign groups/roles.
+
+### IMAP Email Sign-in
+
+Optional — users can log in with their org email address. Credentials verified against the IMAP server; no password stored locally. Configure in Settings → Email Sign-in. Domain allowlist enforced.
 
 ## Endpoints
 
@@ -83,21 +122,24 @@ LDAP/AD login is optional — configure it in the file (`ldap:` section) or live
 | `/api/v1/info` | GET | File metadata (`?url=...`) |
 | `/api/v1/download` | GET | Streamed download (`?url=...`) |
 | `/api/v1/downloads/recent` | GET | Current user's last downloads |
-| `/api/v1/admin/*` | GET/POST/PUT/DELETE | Users, groups, audit log, metrics, LDAP |
-| `/healthz`, `/readyz` | GET | Probes |
+| `/api/v1/admin/*` | GET/POST/PUT/DELETE | Users, groups, audit log, metrics, LDAP, IMAP |
+| `/healthz` | GET | Liveness probe |
 
 ## Supported Sources
 
-| Service | Status |
-|---------|--------|
-| WeTransfer (`wetransfer.com`, `we.tl`) | ✅ built in |
-| More services | 🧩 add one — see below |
+| Service | Hosts | Status |
+|---------|-------|--------|
+| **WeTransfer** | `wetransfer.com`, `we.tl` | ✅ built in |
+| **SendGB** | `sendgb.com`, `www.sendgb.com` | ✅ built in |
+| **TransferNow** | `transfernow.net`, `www.transfernow.net` | ✅ built in |
+| **Wesendit** | `wesendit.com`, `www.wesendit.com` | ✅ built in |
+| **SendSpace** | `sendspace.com`, `www.sendspace.com` | ✅ built in |
 
-Password-protected WeTransfer transfers are supported (the UI asks when needed).
+Password-protected transfers are supported (the UI asks when needed).
 
 ## Production Deployment
 
-Terminate TLS at a reverse proxy:
+Terminate TLS at a reverse proxy (nginx, Traefik, Caddy):
 
 ```nginx
 server {
@@ -119,16 +161,37 @@ server {
 }
 ```
 
-Kubernetes: run the image as a Deployment with liveness/readiness probes on `/healthz` and `/readyz`; mount your `config.yaml`.
+Kubernetes: run the image as a Deployment with liveness/readiness probes on `/healthz`; mount your `config/` directory.
+
+### Docker Compose (single volume)
+
+```yaml
+services:
+  webridge:
+    build:
+      context: ..
+      dockerfile: deploy/docker/Dockerfile
+    container_name: webridge
+    restart: unless-stopped
+    ports:
+    - "8080:8080"
+    environment:
+    - CONFIG_PATH=/app/config/config.yaml
+    - LDAP_SETTINGS_FILE=/app/config/ldap-settings.json
+    - IMAP_SETTINGS_FILE=/app/config/imap-settings.json
+    - PROXY_LOGGING_LEVEL=info
+    volumes:
+    - ./config:/app/config
+```
 
 ## Architecture
 
 ```
 User (Browser) → [HTTPS] → Your Server → [HTTPS] → Source API/CDN
-                                    ↓
-                            Resolve direct URL
-                                    ↓
-                            Stream → User
+                                     ↓
+                             Resolve direct URL
+                                     ↓
+                             Stream → User
 ```
 
 No files stored on disk — pure streaming with `io.CopyBuffer`.
@@ -139,7 +202,7 @@ No files stored on disk — pure streaming with `io.CopyBuffer`.
 - Private/loopback/link-local IP blocking
 - Rate limiting per IP (token bucket) + global concurrency cap
 - Security headers (CSP, HSTS, ...)
-- Session cookies, bcrypt-hashed passwords, non-root container
+- Session cookies, SHA-256+salt hashed passwords at runtime, non-root container
 
 ## Adding a Source
 
@@ -151,7 +214,7 @@ func (c *MyClient) Resolve(ctx, url, auth) (*TransferInfo, err) // metadata + di
 func (c *MyClient) Stream(ctx, info, w) error                   // pipe bytes out
 ```
 
-See `internal/wetransfer/wetransfer.go` for a complete implementation. Wire it into `cmd/server/main.go` alongside the existing client and extend the domain allowlist in `internal/middleware/security.go`.
+See `internal/providers/wetransfer.go` for a complete implementation. Wire it into `cmd/server/main.go` alongside the existing clients.
 
 ## License
 

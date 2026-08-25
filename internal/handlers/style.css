@@ -865,3 +865,105 @@ footer a:hover {
     color: var(--color-accent);
     font-weight: 500;
 }
+
+/* ---- groups panel (collapsible) ---- */
+.groups-panel {
+    margin-top: 24px;
+    padding: 16px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+}
+
+.groups-summary {
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--color-text);
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.groups-summary::-webkit-details-marker {
+    display: none;
+}
+
+.groups-summary::before {
+    content: '';
+    width: 0;
+    height: 0;
+    border-left: 6px solid var(--color-text-muted);
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    transition: transform var(--transition);
+    flex-shrink: 0;
+}
+
+.groups-panel[open] .groups-summary::before {
+    transform: rotate(90deg);
+}
+
+.groups-content {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--color-border);
+    animation: slideDown 200ms ease;
+}
+
+@keyframes slideDown {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* ---- groups cell in users table ---- */
+.groups-cell {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+
+.group-checkbox-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.8rem;
+    color: var(--color-text-muted);
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--color-border);
+    transition: all var(--transition);
+    white-space: nowrap;
+}
+
+.group-checkbox-label:hover {
+    background: var(--color-surface-hover);
+    border-color: var(--color-text-muted);
+}
+
+.group-checkbox-label input[type="checkbox"] {
+    accent-color: var(--color-secondary);
+    width: 14px;
+    height: 14px;
+}
+
+.group-checkbox-label input[type="checkbox"]:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.group-checkbox-label:has(input:disabled) {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* ---- supported providers hint ---- */
+.supported-hint {
+    font-size: 0.8rem;
+    color: var(--color-text-muted);
+    margin-top: 8px;
+}

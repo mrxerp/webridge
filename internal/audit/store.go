@@ -230,3 +230,14 @@ func (s *Store) Count(q Query) int64 {
 	s.db.QueryRow("SELECT COUNT(*) FROM audit_events WHERE "+where, args...).Scan(&n)
 	return n
 }
+
+// TotalBytes returns the sum of bytes_transferred for events matching the action.
+func (s *Store) TotalBytes(action string) int64 {
+	var n int64
+	if action != "" {
+		s.db.QueryRow("SELECT COALESCE(SUM(bytes_transferred), 0) FROM audit_events WHERE action = ?", action).Scan(&n)
+	} else {
+		s.db.QueryRow("SELECT COALESCE(SUM(bytes_transferred), 0) FROM audit_events").Scan(&n)
+	}
+	return n
+}

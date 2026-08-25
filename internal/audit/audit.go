@@ -3,6 +3,7 @@ package audit
 import (
 	"encoding/csv"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"sync"
@@ -28,8 +29,13 @@ type Event struct {
 }
 
 type Metrics struct {
-	Logins     int64 `json:"logins"`
-	LoginFails int64 `json:"failed_logins"`
+	Active     int64  `json:"active_downloads"`
+	Completed  int64  `json:"completed_downloads"`
+	Failed     int64  `json:"failed_downloads"`
+	Bytes      int64  `json:"bytes_transferred"`
+	BytesHuman string `json:"bytes_human"`
+	Logins     int64  `json:"logins"`
+	LoginFails int64  `json:"failed_logins"`
 }
 
 type Log struct {
@@ -39,6 +45,7 @@ type Log struct {
 
 	store *Store
 
+	active     atomic.Int64
 	logins     atomic.Int64
 	loginFails atomic.Int64
 }
@@ -76,12 +83,12 @@ func (l *Log) AddEvent(e Event) {
 }
 
 type Query struct {
-	User     string
-	Action   string
-	Limit    int
-	Offset   int
-	FromMs   int64
-	ToMs     int64
+	User   string
+	Action string
+	Limit  int
+	Offset int
+	FromMs int64
+	ToMs   int64
 }
 
 func (l *Log) Query(q Query) []Event {
@@ -108,31 +115,37 @@ func (l *Log) Query(q Query) []Event {
 }
 
 func (l *Log) Count(q Query) int64 {
-	if l.store == nil {
-		return 0
+	if l.store != nil {
+		return l.store.Count(q)
 	}
-	return l.store.Count(q)
+	return 0
+}
+
+func (l *Log) StartDownload() {
+	l.active.Add(1)
+}
+
+func (l *Log) EndDownload(ok bool, bytes int64) {
+	l.active.Add(-1)
 }
 
 func (l *Log) GetMetrics() Metrics {
-	return Metrics{
+	m := Metrics{
+		Active:     l.active.Load(),
 		Logins:     l.logins.Load(),
 		LoginFails: l.loginFails.Load(),
 	}
+	if l.store != nil {
+		m.Completed = l.store.Count(Query{Action: "download_success"})
+		m.Failed = l.store.Count(Query{Action: "download_error"})
+		m.Bytes = l.store.TotalBytes("download_success")
+	}
+	m.BytesHuman = FormatBytes(m.Bytes)
+	return m
 }
 
-// MetricsHandler returns current login metrics.
 func (l *Log) MetricsHandler(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, l.GetMetrics())
-}
-
-// Login records a login attempt.
-func (l *Log) Login(ok bool) {
-	if ok {
-		l.logins.Add(1)
-	} else {
-		l.loginFails.Add(1)
-	}
 }
 
 func (l *Log) EventsHandler(w http.ResponseWriter, r *http.Request) {
@@ -154,7 +167,6 @@ func (l *Log) EventsHandler(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, resp)
 }
 
-// LogClientEvent handles POST /api/v1/audit/log from the frontend.
 func (l *Log) LogClientEvent(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Action string `json:"action"`
@@ -211,6 +223,9 @@ func WriteJSON(w http.ResponseWriter, v any) {
 }
 
 func FormatBytes(b int64) string {
+	if b <= 0 {
+		return "0 B"
+	}
 	const unit = 1024
 	if b < unit {
 		return strconv.FormatInt(b, 10) + " B"
@@ -220,5 +235,5 @@ func FormatBytes(b int64) string {
 		div *= unit
 		exp++
 	}
-	return strconv.FormatFloat(float64(b)/float64(div), 'f', 1, 64) + " KMGTPE"[exp:exp+1]
+	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }

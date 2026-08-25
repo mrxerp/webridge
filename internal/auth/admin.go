@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
+
+	"gopkg.in/yaml.v3"
 
 	"webridge/internal/audit"
 	"webridge/internal/config"
@@ -315,11 +318,60 @@ func (s *Service) saveLDAP() error {
 	if s.ldapFile == "" {
 		return nil
 	}
+	if err := os.MkdirAll(filepath.Dir(s.ldapFile), 0o755); err != nil {
+		return err
+	}
 	data, err := json.Marshal(s.ldapCfg)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.ldapFile, data, 0o600)
+	if err := os.WriteFile(s.ldapFile, data, 0o644); err != nil {
+		return err
+	}
+	return s.syncConfigYAML()
+}
+
+// syncConfigYAML writes the current LDAP/IMAP config back to config.yaml.
+// Caller must hold s.mu.
+func (s *Service) syncConfigYAML() error {
+	if s.configFile == "" {
+		return nil
+	}
+	data, err := os.ReadFile(s.configFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var raw map[string]any
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	raw["ldap"] = s.ldapCfg
+	raw["imap"] = s.imapCfg
+	out, err := yaml.Marshal(raw)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.configFile, out, 0o644)
+}
+
+func (s *Service) saveIMAP() error {
+	if s.imapFile == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(s.imapFile), 0o755); err != nil {
+		return err
+	}
+	data, err := json.Marshal(s.imapCfg)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(s.imapFile, data, 0o644); err != nil {
+		return err
+	}
+	return s.syncConfigYAML()
 }
 
 // IMAPStatus returns the runtime email sign-in config. No secrets are stored
@@ -382,17 +434,7 @@ func (s *Service) TestIMAP(auditLog *audit.Log) http.HandlerFunc {
 	}
 }
 
-func (s *Service) saveIMAP() error {
-	if s.imapFile == "" {
-		return nil
-	}
-	data, err := json.Marshal(s.imapCfg)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(s.imapFile, data, 0o600)
-}
-
+// normalizePerms normalizes permission strings.
 func normalizePerms(perms []string) ([]string, error) {
 	valid := map[string]bool{}
 	for _, p := range ValidPerms {

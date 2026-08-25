@@ -4,18 +4,36 @@ services:
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile
+    image: webridge
     container_name: webridge
     restart: unless-stopped
     ports:
     - "8080:8080"
+    #networks:
+    #- webridge
+    dns:
+    - 1.1.1.1
+    #labels:
+    #- "traefik.enable=true"
+    #- "traefik.http.routers.webridge.entrypoints=websecure"
+    #- "traefik.http.routers.webridge.rule=Host(`webridge.domain.tld`)"
+    #- "traefik.http.routers.webridge.tls.certresolver=cloudflare"
+    #- "traefik.http.services.webridge.loadbalancer.server.port=8080"
+    #- "traefik.http.services.webridge.loadbalancer.server.scheme=http"
     environment:
-    - CONFIG_PATH=/app/config.yaml
-    - LDAP_SETTINGS_FILE=/app/data/ldap-settings.json
+    - CONFIG_PATH=/app/config/config.yaml
+    - LDAP_SETTINGS_FILE=/app/config/ldap-settings.json
+    - IMAP_SETTINGS_FILE=/app/config/imap-settings.json
+    - PROXY_LOGGING_LEVEL=info
     volumes:
-    - ./config.yaml:/app/config.yaml:ro
-    - ./data:/app/data
+    - ./config:/app/config
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
+
+#networks:
+#  webridge:
+#    name: webridge
+#    driver: external

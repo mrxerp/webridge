@@ -58,11 +58,11 @@
                 <div id="downloadView">
                     <section class="input-section" id="inputSection">
                         <div class="input-group">
-                            <label for="urlInput" class="visually-hidden">WeTransfer URL</label>
+                            <label for="urlInput" class="visually-hidden">Download URL</label>
                             <input 
                                 type="url" 
                                 id="urlInput" 
-                                placeholder="Paste a WeTransfer link..."
+                                placeholder="Paste a download link..."
                                 autocomplete="off"
                                 spellcheck="false"
                             >
@@ -71,6 +71,7 @@
                                 <span class="btn-loader" hidden></span>
                             </button>
                         </div>
+                        <p id="supportedHint" class="supported-hint"></p>
                         <p id="urlError" class="error-message" hidden></p>
                     </section>
 
@@ -305,9 +306,10 @@
                         </form>
                     </section>
 
-                    <section class="admin-section">
+<section class="admin-section">
                         <h2 class="section-title">Access Control</h2>
-                        <h3 class="section-subtitle">Users</h3>
+                        
+                        <!-- Add User Form -->
                         <form id="addUserForm" class="inline-form">
                             <input type="text" id="newUsername" placeholder="Username" autocomplete="off" required>
                             <input type="password" id="newPassword" placeholder="Password" autocomplete="new-password" required>
@@ -321,8 +323,10 @@
                             </button>
                         </form>
                         <p id="usersError" class="error-message" hidden></p>
+
+                        <!-- Users Table with Inline Group Assignment -->
                         <div class="table-wrap">
-                            <table class="audit-table">
+                            <table class="audit-table" id="usersTable">
                                 <thead>
                                     <tr>
                                         <th>Username</th>
@@ -336,29 +340,34 @@
                             </table>
                         </div>
 
-                        <h3 class="section-subtitle">Groups</h3>
-                        <p class="hint">Permissions: <code>download</code> use the downloader &middot; <code>audit</code> logs &amp; metrics &middot; <code>users</code> manage settings &middot; <code>groups</code> manage groups. Full access = the admin <em>role</em>, set per user.</p>
-                        <form id="addGroupForm" class="inline-form">
-                            <input type="text" id="newGroupName" placeholder="Group name" autocomplete="off" required>
-                            <span id="newGroupPerms"></span>
-                            <button class="btn btn-primary btn-small" type="submit">
-                                <span class="btn-text">Add Group</span>
-                                <span class="btn-loader" hidden></span>
-                            </button>
-                        </form>
-                        <p id="groupsError" class="error-message" hidden></p>
-                        <div class="table-wrap">
-                            <table class="audit-table">
-                                <thead>
-                                    <tr>
-                                        <th>Group</th>
-                                        <th>Permissions</th>
-                                        <th></th>
-                                    </tr>
-                                </thead>
-                                <tbody id="groupsBody"></tbody>
-                            </table>
-                        </div>
+                        <!-- Manage Groups (Collapsible) -->
+                        <details class="groups-panel" id="groupsPanel">
+                            <summary class="groups-summary">Manage Groups</summary>
+                            <div class="groups-content">
+                                <p class="hint">Permissions: <code>download</code> use the downloader &middot; <code>audit</code> logs & metrics &middot; <code>users</code> manage settings &middot; <code>groups</code> manage groups. Full access = the admin <em>role</em>, set per user.</p>
+                                <form id="addGroupForm" class="inline-form">
+                                    <input type="text" id="newGroupName" placeholder="Group name" autocomplete="off" required>
+                                    <span id="newGroupPerms"></span>
+                                    <button class="btn btn-primary btn-small" type="submit">
+                                        <span class="btn-text">Add Group</span>
+                                        <span class="btn-loader" hidden></span>
+                                    </button>
+                                </form>
+                                <p id="groupsError" class="error-message" hidden></p>
+                                <div class="table-wrap">
+                                    <table class="audit-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Group</th>
+                                                <th>Permissions</th>
+                                                <th></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="groupsBody"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </details>
                     </section>
                 </div>
 

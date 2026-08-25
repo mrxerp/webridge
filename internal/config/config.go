@@ -241,5 +241,5 @@ func GetConfigPath() string {
 	if p := os.Getenv("CONFIG_PATH"); p != "" {
 		return p
 	}
-	return "config.yaml"
+	return "/app/config/config.yaml"
 }

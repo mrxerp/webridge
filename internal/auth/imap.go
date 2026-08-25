@@ -33,7 +33,10 @@ func (s *Service) imapAuth(email, password string) (bool, error) {
 		c   *imapclient.Client
 		err error
 	)
-	if ic.UseStartTLS {
+	// Port 993 = IMAPS (direct TLS), always use DialTLS regardless of UseStartTLS
+	// Port 143 with UseStartTLS = upgrade from plain
+	// Otherwise fallback to DialTLS (covers custom TLS ports)
+	if ic.Port == 143 && ic.UseStartTLS {
 		c, err = imapclient.DialStartTLS(addr, opts)
 	} else {
 		c, err = imapclient.DialTLS(addr, opts)
