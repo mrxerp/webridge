@@ -324,11 +324,6 @@ func (s *Service) RequireAuth(next http.Handler) http.Handler {
 	})
 }
 
-// Bruteforce returns the brute-force rate limiter for admin API access.
-func (s *Service) Bruteforce() *Bruteforce {
-	return s.bf
-}
-
 // RequirePerm must run after RequireAuth; checks the user's effective permissions.
 func (s *Service) RequirePerm(perm string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -350,10 +345,6 @@ func (s *Service) BruteforceStateHandler(w http.ResponseWriter, r *http.Request)
 
 // BruteforceConfigHandler updates brute-force settings at runtime.
 func (s *Service) BruteforceConfigHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPut {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	var cfg config.LoginRateConfig
 	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -365,10 +356,6 @@ func (s *Service) BruteforceConfigHandler(w http.ResponseWriter, r *http.Request
 
 // BruteforceResetHandler clears lockout state.
 func (s *Service) BruteforceResetHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	var body struct {
 		IP       string `json:"ip"`
 		Username string `json:"username"`

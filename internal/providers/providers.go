@@ -3,6 +3,8 @@ package providers
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -43,7 +45,6 @@ type Provider interface {
 type ClientConfig struct {
 	RequestTimeout time.Duration
 	MaxRedirects   int
-	UserAgent      string
 }
 
 // BaseClient provides common HTTP client functionality.
@@ -53,9 +54,6 @@ type BaseClient struct {
 }
 
 func NewBaseClient(cfg ClientConfig) *BaseClient {
-	if cfg.UserAgent == "" {
-		cfg.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-	}
 	return &BaseClient{
 		httpClient: &http.Client{
 			Timeout: cfg.RequestTimeout,
@@ -66,7 +64,57 @@ func NewBaseClient(cfg ClientConfig) *BaseClient {
 				return nil
 			},
 		},
-		userAgent: cfg.UserAgent,
+		userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+	}
+}
+
+// Stream downloads the file from info.DirectURL and writes it to w.
+func (c *BaseClient) Stream(ctx context.Context, info *TransferInfo, w http.ResponseWriter) (int64, error) {
+	const maxRetries = 3
+	const baseBackoff = 2 * time.Second
+	buf := make([]byte, 32*1024)
+
+	attempt := 0
+	for {
+		req, err := http.NewRequestWithContext(ctx, "GET", info.DirectURL, nil)
+		if err != nil {
+			return 0, err
+		}
+		req.Header.Set("User-Agent", c.userAgent)
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			if attempt == maxRetries {
+				return 0, fmt.Errorf("upstream failed after %d retries: %w", maxRetries, err)
+			}
+			select {
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			case <-time.After(baseBackoff * time.Duration(attempt+1)):
+			}
+			attempt++
+			continue
+		}
+
+		for k, v := range resp.Header {
+			if k == "Content-Type" || k == "Content-Length" || k == "Content-Disposition" || k == "Content-Range" || k == "Accept-Ranges" || k == "ETag" || k == "Last-Modified" {
+				for _, vv := range v {
+					w.Header().Add(k, vv)
+				}
+			}
+		}
+		w.WriteHeader(resp.StatusCode)
+
+		n, err := io.CopyBuffer(w, resp.Body, buf)
+		resp.Body.Close()
+
+		if err != nil {
+			if IsClientDisconnect(err) {
+				return n, nil
+			}
+			return n, err
+		}
+		return n, nil
 	}
 }
 
@@ -93,4 +141,33 @@ func IsClientDisconnect(err error) bool {
 		strings.Contains(errStr, "connection reset") ||
 		strings.Contains(errStr, "connection closed") ||
 		strings.Contains(errStr, "use of closed network connection")
+}
+
+// IsFormatError reports whether the error indicates an invalid URL format
+// for the provider (not an upstream API failure).
+func IsFormatError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := strings.ToLower(err.Error())
+	return strings.Contains(errStr, "unsupported") && strings.Contains(errStr, "url format") ||
+		strings.Contains(errStr, "domain not allowed") ||
+		strings.Contains(errStr, "invalid url")
+}
+
+// IsUpstreamError reports whether the error indicates a provider API failure
+// (network, parsing, rate limit, etc.) rather than a client input error.
+func IsUpstreamError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := strings.ToLower(err.Error())
+	return strings.Contains(errStr, "api request failed") ||
+		strings.Contains(errStr, "failed to parse api response") ||
+		strings.Contains(errStr, "api error") ||
+		strings.Contains(errStr, "no download url") ||
+		strings.Contains(errStr, "no files in") ||
+		strings.Contains(errStr, "context deadline") ||
+		strings.Contains(errStr, "timeout") ||
+		strings.Contains(errStr, "upstream failed")
 }

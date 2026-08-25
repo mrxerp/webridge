@@ -78,13 +78,7 @@ func main() {
 		logger.Info("audit store ready", "db", cfg.Audit.DBPath, "retention_days", cfg.Audit.RetentionDays)
 	}
 
-	auditLog := audit.NewWithStore(5000, auditStore, audit.AnomalyConfig{
-		OffHoursStart:      cfg.Audit.OffHoursStart,
-		OffHoursEnd:        cfg.Audit.OffHoursEnd,
-		BulkDownloadCount:  cfg.Audit.BulkDownloadCount,
-		BulkDownloadWindow: cfg.Audit.BulkDownloadWindow,
-		MaxFileSizeGB:      cfg.Audit.MaxFileSizeGB,
-	})
+	auditLog := audit.NewWithStore(5000, auditStore)
 	ldapFile := os.Getenv("LDAP_SETTINGS_FILE")
 	if ldapFile == "" {
 		ldapFile = filepath.Join(filepath.Dir(*configPath), "ldap-settings.json")
@@ -143,7 +137,6 @@ func main() {
 	var handler http.Handler = mux
 	for _, mw := range []func(http.Handler) http.Handler{
 		appmiddleware.AccessLog(cfg.Audit.AccessLogDir, logger),
-		appmiddleware.Logging(logger),
 		appmiddleware.SecurityHeaders,
 		appmiddleware.ValidateURL,
 		rateLimiter.Middleware,

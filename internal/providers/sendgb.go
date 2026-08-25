@@ -1,26 +1,23 @@
 package providers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
-	"time"
 )
 
 const (
-	sendgbAPIBaseURL = "https://api.sendgb.com/v2"
-	sendgbUserAgent  = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+	sendgbAPIBaseURL = "https://api.sendgb.com/api"
 )
 
 var (
-	sendgbShortURLRegex = regexp.MustCompile(`^https?://sendgb\.com/([a-zA-Z0-9]+)/?$`)
-	sendgbFileURLRegex  = regexp.MustCompile(`^https?://sendgb\.com/file/([a-zA-Z0-9]+)/?$`)
+	sendgbShortURLRegex = regexp.MustCompile(`^https?://(?:www\.)?sendgb\.com/(?:[a-z]{2}/download/)?([a-zA-Z0-9]+)/?$`)
+	sendgbFileURLRegex  = regexp.MustCompile(`^https?://(?:www\.)?sendgb\.com/file/([a-zA-Z0-9]+)/?$`)
 )
 
 type SendGBClient struct {
@@ -28,9 +25,6 @@ type SendGBClient struct {
 }
 
 func NewSendGBClient(cfg ClientConfig) *SendGBClient {
-	if cfg.UserAgent == "" {
-		cfg.UserAgent = sendgbUserAgent
-	}
 	return &SendGBClient{BaseClient: NewBaseClient(cfg)}
 }
 
@@ -39,88 +33,43 @@ func (c *SendGBClient) Name() string {
 }
 
 func (c *SendGBClient) Hosts() []string {
-	return []string{"sendgb.com"}
+	return []string{"sendgb.com", "www.sendgb.com"}
 }
 
 func (c *SendGBClient) Resolve(ctx context.Context, inputURL, password string) (*TransferInfo, error) {
-	fileID, err := c.parseURL(inputURL)
+	code, err := c.parseURL(inputURL)
 	if err != nil {
 		return nil, err
 	}
 
-	directLink, fileName, fileSize, err := c.getFileInfo(ctx, fileID, password)
+	info, err := c.getTransferInfo(ctx, code, password)
+	if err != nil {
+		return nil, err
+	}
+
+	directURL, err := c.getDownloadURL(ctx, code, info.FileKey, password)
 	if err != nil {
 		return nil, err
 	}
 
 	return &TransferInfo{
-		DirectURL: directLink,
-		FileName:  fileName,
-		FileSize:  fileSize,
+		DirectURL: directURL,
+		FileName:  info.FileName,
+		FileSize:  info.FileSize,
 		FileCount: 1,
 	}, nil
-}
-
-func (c *SendGBClient) Stream(ctx context.Context, info *TransferInfo, w http.ResponseWriter) (int64, error) {
-	const maxRetries = 3
-	const baseBackoff = 2 * time.Second
-	buf := make([]byte, 32*1024)
-
-	attempt := 0
-	for {
-		req, err := http.NewRequestWithContext(ctx, "GET", info.DirectURL, nil)
-		if err != nil {
-			return 0, err
-		}
-		req.Header.Set("User-Agent", c.userAgent)
-
-		resp, err := c.httpClient.Do(req)
-		if err != nil {
-			if attempt == maxRetries {
-				return 0, fmt.Errorf("upstream failed after %d retries: %w", maxRetries, err)
-			}
-			select {
-			case <-ctx.Done():
-				return 0, ctx.Err()
-			case <-time.After(baseBackoff * time.Duration(attempt+1)):
-			}
-			attempt++
-			continue
-		}
-
-		for k, v := range resp.Header {
-			if k == "Content-Type" || k == "Content-Length" || k == "Content-Disposition" || k == "Content-Range" || k == "Accept-Ranges" || k == "ETag" || k == "Last-Modified" {
-				for _, vv := range v {
-					w.Header().Add(k, vv)
-				}
-			}
-		}
-		w.WriteHeader(resp.StatusCode)
-
-		n, err := io.CopyBuffer(w, resp.Body, buf)
-		resp.Body.Close()
-
-		if err != nil {
-			if IsClientDisconnect(err) {
-				return n, nil
-			}
-			return n, err
-		}
-		return n, nil
-	}
 }
 
 func (c *SendGBClient) parseURL(inputURL string) (string, error) {
 	parsed, err := url.Parse(inputURL)
 	if err != nil {
-		return "", fmt.Errorf("invalid URL: %w", err)
+		return "", err
 	}
 
 	host := strings.ToLower(parsed.Host)
 	if host != "sendgb.com" && !strings.HasSuffix(host, ".sendgb.com") {
 		return "", errors.New("domain not allowed: only sendgb.com is supported")
 	}
-
 
 	if matches := sendgbShortURLRegex.FindStringSubmatch(inputURL); len(matches) == 2 {
 		return matches[1], nil
@@ -133,46 +82,147 @@ func (c *SendGBClient) parseURL(inputURL string) (string, error) {
 	return "", errors.New("unsupported SendGB URL format")
 }
 
-type sendgbFileResponse struct {
-	DownloadURL string `json:"download_url"`
-	FileName    string `json:"file_name"`
-	FileSize    int64  `json:"file_size"`
-	Error       string `json:"error"`
+type sendgbTransferInfo struct {
+	FileName string
+	FileSize int64
+	FileKey  string
 }
 
-func (c *SendGBClient) getFileInfo(ctx context.Context, fileID, password string) (string, string, int64, error) {
-	apiURL := sendgbAPIBaseURL + "/file/" + fileID
-	if password != "" {
-		apiURL += "?password=" + url.QueryEscape(password)
-	}
+type sendgbTransferResponse struct {
+	OK        bool   `json:"ok"`
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	TotalSize int64  `json:"total_size"`
+	Files     []struct {
+		Name string `json:"name"`
+		Key  string `json:"key"`
+		Size int64  `json:"size"`
+	} `json:"files"`
+}
+
+func (c *SendGBClient) getTransferInfo(ctx context.Context, code, password string) (*sendgbTransferInfo, error) {
+	apiURL := sendgbAPIBaseURL + "/download/" + code
 
 	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 	if err != nil {
-		return "", "", 0, err
+		return nil, err
 	}
 	req.Header.Set("User-Agent", c.userAgent)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept-Language", "en")
+	if password != "" {
+		req.Header.Set("X-Transfer-Password", password)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", "", 0, fmt.Errorf("API request failed: %w", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 
-	var result sendgbFileResponse
+	var result sendgbTransferResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", "", 0, fmt.Errorf("failed to parse API response: %w", err)
+		return nil, err
 	}
 
-	if result.Error != "" {
-		if strings.Contains(strings.ToLower(result.Error), "password") {
-			return "", "", 0, &PasswordRequiredError{}
+	if !result.OK {
+		msg := strings.ToLower(result.Message)
+		if strings.Contains(msg, "password") || result.Code == "incorrect_password" {
+			return nil, &PasswordRequiredError{}
 		}
-		return "", "", 0, fmt.Errorf("API error: %s", result.Error)
+		if result.Code == "not_found" {
+			return nil, errors.New("transfer not found or expired")
+		}
+		return nil, errors.New(result.Message)
 	}
 
-	if result.DownloadURL == "" {
-		return "", "", 0, errors.New("no download URL in API response")
+	if len(result.Files) == 0 {
+		return nil, errors.New("no files in transfer")
 	}
 
-	return result.DownloadURL, result.FileName, result.FileSize, nil
+	first := result.Files[0]
+	return &sendgbTransferInfo{
+		FileName: first.Name,
+		FileSize: result.TotalSize,
+		FileKey:  first.Key,
+	}, nil
+}
+
+type sendgbWaybillResponse struct {
+	OK           bool   `json:"ok"`
+	SessionToken string `json:"session_token"`
+}
+
+type sendgbWaybillSegment struct {
+	Type string `json:"type"`
+	URL  string `json:"url"`
+}
+
+type sendgbWaybillSegmentsResponse struct {
+	OK       bool                   `json:"ok"`
+	Segments []sendgbWaybillSegment `json:"segments"`
+}
+
+func (c *SendGBClient) getDownloadURL(ctx context.Context, code, fileKey, password string) (string, error) {
+	waybillBody, _ := json.Marshal(map[string]any{
+		"all":  "all",
+		"keys": []string{fileKey},
+	})
+
+	sessionURL := sendgbAPIBaseURL + "/download/" + code + "/waybill-session"
+	req, err := http.NewRequestWithContext(ctx, "POST", sessionURL, bytes.NewReader(waybillBody))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", c.userAgent)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	if password != "" {
+		req.Header.Set("X-Transfer-Password", password)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var sessionResp sendgbWaybillResponse
+	if err := json.NewDecoder(resp.Body).Decode(&sessionResp); err != nil {
+		return "", err
+	}
+	if !sessionResp.OK {
+		return "", errors.New("waybill session failed")
+	}
+
+	segmentsURL := sendgbAPIBaseURL + "/download/waybill-session/" + sessionResp.SessionToken + "?ulid=" + code
+	req2, err := http.NewRequestWithContext(ctx, "GET", segmentsURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req2.Header.Set("User-Agent", c.userAgent)
+	req2.Header.Set("Accept", "application/json")
+
+	resp2, err := c.httpClient.Do(req2)
+	if err != nil {
+		return "", err
+	}
+	defer resp2.Body.Close()
+
+	var segResp sendgbWaybillSegmentsResponse
+	if err := json.NewDecoder(resp2.Body).Decode(&segResp); err != nil {
+		return "", err
+	}
+
+	if !segResp.OK || len(segResp.Segments) == 0 {
+		return "", errors.New("no download segments")
+	}
+
+	for _, seg := range segResp.Segments {
+		if seg.Type == "DATA" && seg.URL != "" {
+			return seg.URL, nil
+		}
+	}
+
+	return "", errors.New("no download URL")
 }

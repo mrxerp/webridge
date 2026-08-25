@@ -1,10 +1,8 @@
 package handlers
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
-	"hash"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -39,8 +37,6 @@ func NewDownloadHandler(cfg *config.Config, logger *slog.Logger, auditLog *audit
 	}
 }
 
-// urlParamOr400 returns the validated url query param, or "" after writing
-// the error response.
 func (h *DownloadHandler) urlParamOr400(w http.ResponseWriter, r *http.Request) string {
 	url := r.URL.Query().Get("url")
 	if url == "" {
@@ -70,23 +66,27 @@ func (h *DownloadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	start := time.Now()
-	clientIP := middleware.ClientIP(r)
 	username := auth.Username(r.Context())
-	h.audit.StartDownload()
+	clientIP := middleware.ClientIP(r)
+	start := time.Now()
 
 	provider, err := h.providers.ResolveProvider(urlParam)
 	if err != nil {
-		h.logDownload(username, clientIP, urlParam, nil, 0, err, time.Since(start))
-		http.Error(w, "Unsupported URL.", http.StatusBadRequest)
+		h.logDownload(username, clientIP, urlParam, "", nil, 0, err, time.Since(start))
+		if errors.Is(err, providers.ErrNoProvider) {
+			names := h.providers.GetProviderNames()
+			http.Error(w, "This service isn't supported yet. Supported: "+strings.Join(names, ", "), http.StatusBadRequest)
+		} else {
+			http.Error(w, "Unsupported URL.", http.StatusBadRequest)
+		}
 		return
 	}
 
-	isShortURL := provider.Name() == "wetransfer" && (strings.HasPrefix(urlParam, "https://we.tl/") || strings.HasPrefix(urlParam, "http://we.tl/"))
+	isShortURL := provider.Name() == "wetransfer" && strings.HasPrefix(urlParam, "https://we.tl/")
 
 	info, err := provider.Resolve(ctx, urlParam, r.URL.Query().Get("password"))
 	if err != nil {
-		h.logDownload(username, clientIP, urlParam, nil, 0, err, time.Since(start))
+		h.logDownload(username, clientIP, urlParam, provider.Name(), nil, 0, err, time.Since(start))
 		var pwErr *providers.PasswordRequiredError
 		if errors.As(err, &pwErr) {
 			w.Header().Set("Content-Type", "application/json")
@@ -101,60 +101,37 @@ func (h *DownloadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			shortURLError(w, err)
 			return
 		}
+		if providers.IsFormatError(err) {
+			http.Error(w, "Invalid "+provider.Name()+" link format.", http.StatusBadRequest)
+			return
+		}
+		if providers.IsUpstreamError(err) {
+			http.Error(w, provider.Name()+" is currently unavailable. Please try again later.", http.StatusBadGateway)
+			return
+		}
 		http.Error(w, "Failed to resolve download: "+err.Error(), http.StatusBadGateway)
 		return
 	}
 
-	if info.FileSize > 0 {
-		maxSize := int64(h.cfg.Limits.MaxFileSizeGB) * 1024 * 1024 * 1024
-		if info.FileSize > maxSize {
-			h.logDownload(username, clientIP, urlParam, info, 0, errors.New("file too large"), time.Since(start))
-			http.Error(w, "File size exceeds limit", http.StatusRequestEntityTooLarge)
-			return
-		}
-	}
-
-	w.Header().Set("Content-Disposition", `attachment; filename="`+sanitizeFilename(info.FileName)+`"`)
-	w.Header().Set("Accept-Ranges", "bytes")
-	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-
-	var hashHex string
-	streamW := w
-	if h.cfg.Audit.HashDownloads && info.FileSize > 0 && info.FileSize <= int64(h.cfg.Audit.MaxHashSizeMB)*1024*1024 {
-		hw := &hashWriter{ResponseWriter: w, h: sha256.New()}
-		streamW = hw
-		defer func() {
-			hashHex = hex.EncodeToString(hw.h.Sum(nil))
-		}()
-	}
-
-	n, err := provider.Stream(ctx, info, streamW)
-	if err != nil {
-		if !providers.IsClientDisconnect(err) {
-			h.logger.Error("stream error", "error", err, "url", urlParam)
-		}
-		h.logDownload(username, clientIP, urlParam, info, n, err, time.Since(start))
+	if info.FileSize > int64(h.cfg.Limits.MaxFileSizeGB)*1024*1024*1024 {
+		h.logDownload(username, clientIP, urlParam, provider.Name(), nil, 0, errors.New("file too large"), time.Since(start))
+		http.Error(w, "File too large", http.StatusRequestEntityTooLarge)
 		return
 	}
 
-	h.audit.AddEvent(audit.Event{
-		Time:             time.Now(),
-		Action:           "download_success",
-		User:             username,
-		IP:               clientIP,
-		Detail:           "success",
-		URL:              urlParam,
-		Provider:         provider.Name(),
-		Filename:         info.FileName,
-		FileSize:         info.FileSize,
-		MimeType:         "",
-		ResolvedURL:      info.DirectURL,
-		BytesTransferred: n,
-		DurationMS:       time.Since(start).Milliseconds(),
-		SHA256:           hashHex,
-		AnomalyFlags:     nil,
-		ClientUA:         r.UserAgent(),
-	})
+	disposition := "attachment"
+	if strings.HasPrefix(info.FileName, "video/") || strings.HasPrefix(info.FileName, "image/") {
+		disposition = "inline"
+	}
+
+	safeName := sanitizeFilename(info.FileName)
+	w.Header().Set("Content-Disposition", disposition+"; filename=\""+safeName+"\"")
+	if info.FileSize > 0 {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", info.FileSize))
+	}
+
+	n, err := provider.Stream(ctx, info, w)
+	h.logDownload(username, clientIP, urlParam, provider.Name(), info, n, err, time.Since(start))
 }
 
 func (h *DownloadHandler) InfoHandler(w http.ResponseWriter, r *http.Request) {
@@ -171,16 +148,21 @@ func (h *DownloadHandler) InfoHandler(w http.ResponseWriter, r *http.Request) {
 
 	provider, err := h.providers.ResolveProvider(urlParam)
 	if err != nil {
-		h.logDownload(username, clientIP, urlParam, nil, 0, err, time.Since(start))
-		http.Error(w, "Unsupported URL. Only WeTransfer links are supported.", http.StatusBadRequest)
+		h.logDownload(username, clientIP, urlParam, "", nil, 0, err, time.Since(start))
+		if errors.Is(err, providers.ErrNoProvider) {
+			names := h.providers.GetProviderNames()
+			http.Error(w, "This service isn't supported yet. Supported: "+strings.Join(names, ", "), http.StatusBadRequest)
+		} else {
+			http.Error(w, "Unsupported URL.", http.StatusBadRequest)
+		}
 		return
 	}
 
-	isShortURL := provider.Name() == "wetransfer" && (strings.HasPrefix(urlParam, "https://we.tl/") || strings.HasPrefix(urlParam, "http://we.tl/"))
+	isShortURL := provider.Name() == "wetransfer" && strings.HasPrefix(urlParam, "https://we.tl/")
 
 	info, err := provider.Resolve(ctx, urlParam, r.URL.Query().Get("password"))
 	if err != nil {
-		h.logDownload(username, clientIP, urlParam, nil, 0, err, time.Since(start))
+		h.logDownload(username, clientIP, urlParam, provider.Name(), nil, 0, err, time.Since(start))
 		var pwErr *providers.PasswordRequiredError
 		if errors.As(err, &pwErr) {
 			w.Header().Set("Content-Type", "application/json")
@@ -195,39 +177,43 @@ func (h *DownloadHandler) InfoHandler(w http.ResponseWriter, r *http.Request) {
 			shortURLError(w, err)
 			return
 		}
+		if providers.IsFormatError(err) {
+			http.Error(w, "Invalid "+provider.Name()+" link format.", http.StatusBadRequest)
+			return
+		}
+		if providers.IsUpstreamError(err) {
+			http.Error(w, provider.Name()+" is currently unavailable. Please try again later.", http.StatusBadGateway)
+			return
+		}
 		http.Error(w, "Failed to resolve: "+err.Error(), http.StatusBadGateway)
 		return
 	}
 
 	h.audit.AddEvent(audit.Event{
-		Time:           time.Now(),
-		Action:         "info_check",
-		User:           username,
-		IP:             clientIP,
-		Detail:         "success",
-		URL:            urlParam,
-		Provider:       provider.Name(),
-		Filename:       info.FileName,
-		FileSize:       info.FileSize,
-		MimeType:       "",
-		ResolvedURL:    info.DirectURL,
+		Time:             time.Now(),
+		Action:           "info_check",
+		User:             username,
+		IP:               clientIP,
+		Detail:           "success",
+		URL:              urlParam,
+		Provider:         provider.Name(),
+		Filename:         info.FileName,
+		FileSize:         info.FileSize,
+		ResolvedURL:      info.DirectURL,
 		BytesTransferred: 0,
-		DurationMS:     time.Since(start).Milliseconds(),
-		SHA256:         "",
-		AnomalyFlags:   nil,
-		ClientUA:       r.UserAgent(),
+		DurationMS:       time.Since(start).Milliseconds(),
+		SHA256:           "",
+		ClientUA:         r.UserAgent(),
 	})
 
-	resp := map[string]any{
-		"provider":    provider.Name(),
-		"filename":    info.FileName,
-		"size":        info.FileSize,
-		"size_human":  audit.FormatBytes(info.FileSize),
-		"file_count":  info.FileCount,
-		"is_short":    isShortURL,
-	}
-
-	audit.WriteJSON(w, resp)
+	audit.WriteJSON(w, map[string]any{
+		"provider":   provider.Name(),
+		"filename":   info.FileName,
+		"size":       info.FileSize,
+		"size_human": audit.FormatBytes(info.FileSize),
+		"file_count": info.FileCount,
+		"is_short":   isShortURL,
+	})
 }
 
 func (h *DownloadHandler) RecentHandler(w http.ResponseWriter, r *http.Request) {
@@ -257,23 +243,21 @@ func sanitizeFilename(name string) string {
 
 func shortURLError(w http.ResponseWriter, err error) {
 	if strings.Contains(err.Error(), "redirect/error") || strings.Contains(err.Error(), "data center IP") {
-		http.Error(w, "Short WeTransfer links (we.tl/...) are blocked by WeTransfer from data center IPs. This server may be on a data center IP range.", http.StatusBadGateway)
-	} else {
-		http.Error(w, "Failed to resolve short URL. Try the full WeTransfer link.", http.StatusBadGateway)
+		http.Error(w, "Short links can't be resolved from data center IPs. Use the full WeTransfer download link instead.", http.StatusBadGateway)
+		return
 	}
+	http.Error(w, "Failed to resolve short URL. Try the full WeTransfer link.", http.StatusBadGateway)
 }
 
-func (h *DownloadHandler) logDownload(username, clientIP, urlParam string, info *providers.TransferInfo, n int64, err error, dur time.Duration) {
+func (h *DownloadHandler) logDownload(username, clientIP, urlParam, providerName string, info *providers.TransferInfo, n int64, err error, dur time.Duration) {
 	action := "download_success"
 	detail := "success"
 	sha256Sum := ""
-	providerName := ""
 	filename := ""
 	filesize := int64(0)
 	resolvedURL := ""
 
 	if info != nil {
-		providerName = providerFromURL(urlParam)
 		filename = info.FileName
 		filesize = info.FileSize
 		resolvedURL = info.DirectURL
@@ -282,10 +266,6 @@ func (h *DownloadHandler) logDownload(username, clientIP, urlParam string, info 
 	if err != nil {
 		detail = "error: " + err.Error()
 		action = "download_error"
-	}
-
-	if info != nil && providerName == "" {
-		providerName = providerFromURL(urlParam)
 	}
 
 	h.audit.AddEvent(audit.Event{
@@ -298,42 +278,10 @@ func (h *DownloadHandler) logDownload(username, clientIP, urlParam string, info 
 		Provider:         providerName,
 		Filename:         filename,
 		FileSize:         filesize,
-		MimeType:         "",
 		ResolvedURL:      resolvedURL,
 		BytesTransferred: n,
 		DurationMS:       dur.Milliseconds(),
 		SHA256:           sha256Sum,
-		AnomalyFlags:     nil,
 		ClientUA:         "",
 	})
-}
-
-func providerFromURL(url string) string {
-	if strings.Contains(url, "wetransfer") || strings.Contains(url, "we.tl") {
-		return "wetransfer"
-	}
-	if strings.Contains(url, "sendgb") {
-		return "sendgb"
-	}
-	if strings.Contains(url, "transfernow") {
-		return "transfernow"
-	}
-	if strings.Contains(url, "wesendit") {
-		return "wesendit"
-	}
-	if strings.Contains(url, "sendspace") {
-		return "sendspace"
-	}
-	return "unknown"
-}
-
-type hashWriter struct {
-	http.ResponseWriter
-	h hash.Hash
-}
-
-func (hw *hashWriter) Write(p []byte) (int, error) {
-	n, err := hw.ResponseWriter.Write(p)
-	hw.h.Write(p[:n])
-	return n, err
 }

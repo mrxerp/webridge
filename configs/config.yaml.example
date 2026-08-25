@@ -7,7 +7,6 @@ server:
   max_header_bytes: 1048576
 
 wetransfer:
-  user_agent: "Mozilla/5.0 (compatible; ProxyDownloader/1.0)"
   request_timeout: 30s
   max_redirects: 10
 
@@ -15,9 +14,6 @@ audit:
   db_path: "data/audit.db"
   retention_days: 90
   access_log_dir: "data/logs"
-  access_log_retention_days: 7
-  hash_downloads: true
-  max_hash_size_mb: 500
   off_hours_start: 22
   off_hours_end: 6
   bulk_download_count: 10
