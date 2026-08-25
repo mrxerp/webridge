@@ -16,8 +16,8 @@ import (
 	"webridge/internal/auth"
 	"webridge/internal/config"
 	"webridge/internal/handlers"
+	"webridge/internal/providers"
 	appmiddleware "webridge/internal/middleware"
-	"webridge/internal/wetransfer"
 )
 
 func main() {
@@ -32,7 +32,38 @@ func main() {
 
 	logger := setupLogger(cfg.Logging)
 
-	wtClient := wetransfer.NewClient(time.Duration(cfg.WeTransfer.RequestTimeout), cfg.WeTransfer.MaxRedirects)
+	// Initialize provider registry
+	providerRegistry := providers.NewRegistry()
+	wtClient := providers.NewWeTransferClient(providers.ClientConfig{
+		RequestTimeout: time.Duration(cfg.WeTransfer.RequestTimeout),
+		MaxRedirects:   cfg.WeTransfer.MaxRedirects,
+	})
+	providerRegistry.Register(wtClient)
+
+	// Register additional providers
+	sendgbClient := providers.NewSendGBClient(providers.ClientConfig{
+		RequestTimeout: time.Duration(cfg.WeTransfer.RequestTimeout),
+		MaxRedirects:   cfg.WeTransfer.MaxRedirects,
+	})
+	providerRegistry.Register(sendgbClient)
+
+	transferNowClient := providers.NewTransferNowClient(providers.ClientConfig{
+		RequestTimeout: time.Duration(cfg.WeTransfer.RequestTimeout),
+		MaxRedirects:   cfg.WeTransfer.MaxRedirects,
+	})
+	providerRegistry.Register(transferNowClient)
+
+	wesenditClient := providers.NewWesenditClient(providers.ClientConfig{
+		RequestTimeout: time.Duration(cfg.WeTransfer.RequestTimeout),
+		MaxRedirects:   cfg.WeTransfer.MaxRedirects,
+	})
+	providerRegistry.Register(wesenditClient)
+
+	sendSpaceClient := providers.NewSendSpaceClient(providers.ClientConfig{
+		RequestTimeout: time.Duration(cfg.WeTransfer.RequestTimeout),
+		MaxRedirects:   cfg.WeTransfer.MaxRedirects,
+	})
+	providerRegistry.Register(sendSpaceClient)
 
 	rateLimiter := appmiddleware.NewRateLimiter(cfg.Limits.RateLimitPerMinute)
 
@@ -47,13 +78,7 @@ func main() {
 		logger.Info("audit store ready", "db", cfg.Audit.DBPath, "retention_days", cfg.Audit.RetentionDays)
 	}
 
-	auditLog := audit.NewWithStore(5000, auditStore, audit.AnomalyConfig{
-		OffHoursStart:      cfg.Audit.OffHoursStart,
-		OffHoursEnd:        cfg.Audit.OffHoursEnd,
-		BulkDownloadCount:  cfg.Audit.BulkDownloadCount,
-		BulkDownloadWindow: cfg.Audit.BulkDownloadWindow,
-		MaxFileSizeGB:      cfg.Audit.MaxFileSizeGB,
-	})
+	auditLog := audit.NewWithStore(5000, auditStore)
 	ldapFile := os.Getenv("LDAP_SETTINGS_FILE")
 	if ldapFile == "" {
 		ldapFile = filepath.Join(filepath.Dir(*configPath), "ldap-settings.json")
@@ -63,7 +88,7 @@ func main() {
 		imapFile = filepath.Join(filepath.Dir(*configPath), "imap-settings.json")
 	}
 	authSvc := auth.New(cfg, logger, ldapFile, imapFile)
-	downloadHandler := handlers.NewDownloadHandler(cfg, logger, auditLog, wtClient)
+	downloadHandler := handlers.NewDownloadHandler(cfg, logger, auditLog, providerRegistry)
 	uiHandler := handlers.UIHandler(cfg)
 
 	mux := http.NewServeMux()
@@ -112,7 +137,6 @@ func main() {
 	var handler http.Handler = mux
 	for _, mw := range []func(http.Handler) http.Handler{
 		appmiddleware.AccessLog(cfg.Audit.AccessLogDir, logger),
-		appmiddleware.Logging(logger),
 		appmiddleware.SecurityHeaders,
 		appmiddleware.ValidateURL,
 		rateLimiter.Middleware,

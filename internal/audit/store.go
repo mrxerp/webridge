@@ -2,7 +2,6 @@ package audit
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -127,11 +126,10 @@ func (s *Store) drain(batch []Event) {
 	}
 	defer stmt.Close()
 	for _, e := range batch {
-		flags, _ := json.Marshal(e.AnomalyFlags)
 		stmt.Exec(e.Time.Format(time.RFC3339Nano), e.Action, e.User, e.IP, e.Detail,
-			e.URL, e.Provider, e.Filename, e.FileSize, e.MimeType,
+			e.URL, e.Provider, e.Filename, e.FileSize, "",
 			e.ResolvedURL, e.BytesTransferred, e.DurationMS, e.SHA256,
-			string(flags), e.ClientUA)
+			"", e.ClientUA)
 	}
 	if err := tx.Commit(); err != nil {
 		s.logger.Error("audit store: commit", "err", err, "dropped", len(batch))
@@ -214,15 +212,12 @@ func (s *Store) Query(q Query) []Event {
 	var out []Event
 	for rows.Next() {
 		var e Event
-		var t, flags string
+		var t, mimeType, flags string
 		rows.Scan(&t, &e.Action, &e.User, &e.IP, &e.Detail, &e.URL,
-			&e.Provider, &e.Filename, &e.FileSize, &e.MimeType,
+			&e.Provider, &e.Filename, &e.FileSize, &mimeType,
 			&e.ResolvedURL, &e.BytesTransferred, &e.DurationMS, &e.SHA256,
 			&flags, &e.ClientUA)
 		e.Time, _ = time.Parse(time.RFC3339Nano, t)
-		if flags != "" && flags != "null" {
-			json.Unmarshal([]byte(flags), &e.AnomalyFlags)
-		}
 		out = append(out, e)
 	}
 	return out
