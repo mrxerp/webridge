@@ -648,19 +648,28 @@
     }
 
     async function updateUser(name, patch) {
-        const res = await fetch(`${API_BASE}/admin/users/${encodeURIComponent(name)}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(patch)
-        });
-        if (!res.ok) showError(elements.usersError, await res.text().catch(() => 'Update failed.'));
+        try {
+            const res = await fetch(`${API_BASE}/admin/users/${encodeURIComponent(name)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(patch)
+            });
+            if (!res.ok) showError(elements.usersError, 'Update failed.');
+        } catch {
+            showError(elements.usersError, 'Update failed.');
+        }
         await loadUsersData();
     }
 
     async function deleteUser(name) {
-        const res = await fetch(`${API_BASE}/admin/users/${encodeURIComponent(name)}`, { method: 'DELETE' });
-        if (!res.ok) {
-            showError(elements.usersError, await res.text().catch(() => 'Delete failed.'));
+        try {
+            const res = await fetch(`${API_BASE}/admin/users/${encodeURIComponent(name)}`, { method: 'DELETE' });
+            if (!res.ok) {
+                showError(elements.usersError, 'Delete failed.');
+                return;
+            }
+        } catch {
+            showError(elements.usersError, 'Delete failed.');
             return;
         }
         if (currentUser && currentUser.username === name) {
@@ -738,18 +747,26 @@
     }
 
     async function updateGroup(name, permissions) {
-        const res = await fetch(`${API_BASE}/admin/groups/${encodeURIComponent(name)}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ permissions })
-        });
-        if (!res.ok) showError(elements.groupsError, await res.text().catch(() => 'Update failed.'));
+        try {
+            const res = await fetch(`${API_BASE}/admin/groups/${encodeURIComponent(name)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ permissions })
+            });
+            if (!res.ok) showError(elements.groupsError, 'Update failed.');
+        } catch {
+            showError(elements.groupsError, 'Update failed.');
+        }
         await loadUsersData();
     }
 
     async function deleteGroup(name) {
-        const res = await fetch(`${API_BASE}/admin/groups/${encodeURIComponent(name)}`, { method: 'DELETE' });
-        if (!res.ok) showError(elements.groupsError, await res.text().catch(() => 'Delete failed.'));
+        try {
+            const res = await fetch(`${API_BASE}/admin/groups/${encodeURIComponent(name)}`, { method: 'DELETE' });
+            if (!res.ok) showError(elements.groupsError, 'Delete failed.');
+        } catch {
+            showError(elements.groupsError, 'Delete failed.');
+        }
         await loadUsersData();
     }
 
@@ -827,8 +844,10 @@
                 const remaining = until > new Date() ? Math.ceil((until - new Date()) / 60000) + 'm' : 'expired';
 
                 const tdType = document.createElement('td');
-                tdType.innerHTML = `<span class="lock-type-${lock.type}"></span>`;
-                tdType.firstChild.textContent = lock.type;
+                const typeSpan = document.createElement('span');
+                typeSpan.className = 'lock-type-' + lock.type;
+                typeSpan.textContent = lock.type;
+                tdType.appendChild(typeSpan);
                 tr.appendChild(tdType);
 
                 const tdKey = document.createElement('td');
@@ -864,16 +883,30 @@
             backoff_base_minutes: parseInt(document.getElementById('bfBackoffBase')?.value) || 1,
             backoff_max_minutes: parseInt(document.getElementById('bfBackoffMax')?.value) || 64
         };
-        await fetch(`${API_BASE}/admin/bruteforce/config`, {
-            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg)
-        });
+        try {
+            await fetch(`${API_BASE}/admin/bruteforce/config`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg)
+            });
+        } catch {}
         loadBruteForce();
     }
 
     async function resetBruteForceAll() {
-        await fetch(`${API_BASE}/admin/bruteforce/reset`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ all: true })
-        });
+        try {
+            await fetch(`${API_BASE}/admin/bruteforce/reset`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ all: true })
+            });
+        } catch {}
+        loadBruteForce();
+    }
+
+    async function resetBruteForceItem(lock) {
+        const body = lock.type === 'ip' ? { ip: lock.key } : { username: lock.key };
+        try {
+            await fetch(`${API_BASE}/admin/bruteforce/reset`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+            });
+        } catch {}
         loadBruteForce();
     }
 
