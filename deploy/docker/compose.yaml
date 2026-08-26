@@ -1,10 +1,11 @@
 ---
 services:
   webridge:
-    build:
-      context: ../..
-      dockerfile: deploy/docker/Dockerfile
-    image: webridge
+    image: ghcr.io/mrxerp/webridge:v0.2.0
+    #image: ghcr.io/mrxerp/webridge:latest
+    #build:                                        # dev: build from source
+    #  context: ../..
+    #  dockerfile: deploy/docker/Dockerfile
     container_name: webridge
     restart: unless-stopped
     ports:

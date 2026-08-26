@@ -19,21 +19,45 @@ A self-hosted file downloader portal. Paste a link from any supported sharing se
 ### Docker (Recommended)
 
 ```bash
-# Create config directory and copy example
-mkdir -p config
-cp configs/config.yaml.example config/config.yaml
+# Pull from GitHub Container Registry
+docker pull ghcr.io/mrxerp/webridge:v0.2.0
 
-# Start with docker compose (single volume mount for all persistent data)
-docker compose -f deploy/docker/compose.yaml up -d
+# Run with a single volume mount
+docker run -d -p 8080:8080 \
+  -v ./config:/app/config \
+  --name webridge \
+  --restart unless-stopped \
+  ghcr.io/mrxerp/webridge:v0.2.0
 ```
 
 **Default login**: `admin` / `admin123` — change it immediately.
+
+### Docker Compose
+
+```bash
+mkdir -p config
+cp configs/config.yaml.example config/config.yaml
+docker compose -f deploy/docker/compose.yaml up -d
+```
 
 ### Local Development
 
 ```bash
 go build -o webridge ./cmd/server
 ./webridge -config configs/config.yaml.example
+```
+
+## Docker Image
+
+Available on [GitHub Container Registry](https://github.com/mrxerp/webridge/pkgs/container/webridge):
+
+| Tag | Platforms | Description |
+|-----|-----------|-------------|
+| `v0.2.0` | `linux/amd64`, `linux/arm64` | Pinned release |
+| `latest` | `linux/amd64`, `linux/arm64` | Latest stable |
+
+```bash
+docker pull ghcr.io/mrxerp/webridge:v0.2.0
 ```
 
 ## Configuration
@@ -168,9 +192,10 @@ Kubernetes: run the image as a Deployment with liveness/readiness probes on `/he
 ```yaml
 services:
   webridge:
-    build:
-      context: ..
-      dockerfile: deploy/docker/Dockerfile
+    image: ghcr.io/mrxerp/webridge:v0.2.0
+    #build:                                        # dev: build from source
+    #  context: ..
+    #  dockerfile: deploy/docker/Dockerfile
     container_name: webridge
     restart: unless-stopped
     ports:
