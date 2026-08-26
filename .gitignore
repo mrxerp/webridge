@@ -6,3 +6,4 @@ ldap-settings.json
 imap-settings.json
 config/
 data/
+server
