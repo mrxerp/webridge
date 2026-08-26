@@ -20,14 +20,14 @@ A self-hosted file downloader portal. Paste a link from any supported sharing se
 
 ```bash
 # Pull from GitHub Container Registry
-docker pull ghcr.io/mrxerp/webridge:v0.2.0
+docker pull ghcr.io/mrxerp/webridge:v0.2.5
 
 # Run with a single volume mount
 docker run -d -p 8080:8080 \
   -v ./config:/app/config \
   --name webridge \
   --restart unless-stopped \
-  ghcr.io/mrxerp/webridge:v0.2.0
+  ghcr.io/mrxerp/webridge:v0.2.5
 ```
 
 **Default login**: `admin` / `admin123` — change it immediately.
@@ -53,11 +53,11 @@ Available on [GitHub Container Registry](https://github.com/mrxerp/webridge/pkgs
 
 | Tag | Platforms | Description |
 |-----|-----------|-------------|
-| `v0.2.0` | `linux/amd64`, `linux/arm64` | Pinned release |
+| `v0.2.5` | `linux/amd64`, `linux/arm64` | Pinned release |
 | `latest` | `linux/amd64`, `linux/arm64` | Latest stable |
 
 ```bash
-docker pull ghcr.io/mrxerp/webridge:v0.2.0
+docker pull ghcr.io/mrxerp/webridge:v0.2.5
 ```
 
 ## Configuration
@@ -192,7 +192,7 @@ Kubernetes: run the image as a Deployment with liveness/readiness probes on `/he
 ```yaml
 services:
   webridge:
-    image: ghcr.io/mrxerp/webridge:v0.2.0
+    image: ghcr.io/mrxerp/webridge:v0.2.5
     #build:                                        # dev: build from source
     #  context: ..
     #  dockerfile: deploy/docker/Dockerfile
@@ -240,7 +240,3 @@ func (c *MyClient) Stream(ctx, info, w) error                   // pipe bytes ou
 ```
 
 See `internal/providers/wetransfer.go` for a complete implementation. Wire it into `cmd/server/main.go` alongside the existing clients.
-
-## License
-
-MIT

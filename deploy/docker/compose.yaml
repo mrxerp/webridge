@@ -1,7 +1,7 @@
 ---
 services:
   webridge:
-    image: ghcr.io/mrxerp/webridge:v0.2.0
+    image: ghcr.io/mrxerp/webridge:v0.2.5
     #image: ghcr.io/mrxerp/webridge:latest
     #build:                                        # dev: build from source
     #  context: ../..
