@@ -1,0 +1,9 @@
+.git
+server
+config/
+data/
+*.db
+*.log
+cookies.txt
+.opencode/
+.lavish/

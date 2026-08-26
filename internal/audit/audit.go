@@ -66,7 +66,7 @@ func (l *Log) AddEvent(e Event) {
 		e.Time = time.Now()
 	}
 	switch e.Action {
-	case "login":
+	case "login_success":
 		l.logins.Add(1)
 	case "login_failed":
 		l.loginFails.Add(1)

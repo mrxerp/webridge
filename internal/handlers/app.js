@@ -340,7 +340,7 @@
 
             const tdFile = document.createElement('td');
             tdFile.className = 'recent-file';
-            tdFile.textContent = d.detail || d.url;
+            tdFile.textContent = d.filename || d.detail || d.url;
             tdFile.title = d.url || '';
             tr.appendChild(tdFile);
 
@@ -1063,7 +1063,7 @@
             elements.fileCount.hidden = true;
         }
 
-        elements.providerBadge.textContent = info.provider || 'WeTransfer';
+        elements.providerBadge.textContent = formatProviderName(info.provider) || 'WeTransfer';
 
         elements.inputSection.hidden = true;
         elements.infoSection.hidden = false;
@@ -1282,6 +1282,12 @@
         if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) return 'Network error. Please check your connection and try again.';
         if (msg.startsWith('HTTP ') || msg.startsWith('Server error:')) return fallback;
         return msg.length < 120 ? msg : fallback;
+    }
+
+    function formatProviderName(name) {
+        if (!name) return '';
+        const map = { wetransfer: 'WeTransfer', sendgb: 'SendGB', transfernow: 'TransferNow', wesendit: 'Wesendit', sendspace: 'SendSpace' };
+        return map[name] || name.charAt(0).toUpperCase() + name.slice(1);
     }
 
     function formatBytes(bytes) {

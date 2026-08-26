@@ -1,27 +1,26 @@
 :root {
     color-scheme: dark;
     --color-bg: #0a0a0f;
+    --color-bg-secondary: #12121c;
     --color-surface: #1a1a24;
     --color-surface-hover: #22223a;
     --color-primary: #ff6b6b;
-    --color-primary-hover: #ff5252;
-    --color-primary-light: rgba(255, 107, 107, 0.1);
     --color-secondary: #a855f7;
     --color-secondary-hover: #9333ea;
+    --color-accent: #00d4ff;
     --color-success: #22c55e;
     --color-error: #ef4444;
     --color-text: #ffffff;
     --color-text-muted: #8b8b9e;
+    --color-text-secondary: #a0a0b8;
     --color-border: #2a2a3a;
     --gradient-primary: linear-gradient(135deg, #ff6b6b 0%, #a855f7 100%);
     --gradient-accent: linear-gradient(135deg, #00d4ff 0%, #a855f7 100%);
-    --shadow-sm: 0 2px 8px rgba(0,0,0,0.3);
     --shadow-md: 0 8px 24px rgba(0,0,0,0.4);
     --shadow-glow: 0 0 40px rgba(168, 85, 247, 0.15);
     --radius-sm: 8px;
     --radius-md: 12px;
     --radius-lg: 16px;
-    --radius-xl: 24px;
     --transition: 200ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -763,8 +762,7 @@ footer a:hover {
 }
 
 .ldap-grid input,
-.row-select,
-.row-input {
+.row-select {
     padding: 6px 10px;
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid var(--color-border);
@@ -794,11 +792,6 @@ footer a:hover {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-
-.row-input {
-    width: 100%;
-    min-width: 120px;
 }
 
 .btn-danger {
