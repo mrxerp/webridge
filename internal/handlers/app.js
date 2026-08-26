@@ -996,11 +996,11 @@
         } catch (err) {
             if (err.name === 'AuthError') return;
             if (isShortWeTransferUrl(url) && err.message.includes('blocked by WeTransfer')) {
-                showError(elements.urlError, 'Short WeTransfer links (we.tl/...) work on residential IPs but may be blocked on data center IPs. Your server appears to be on a data center IP. Please use the full download link (https://wetransfer.com/downloads/...) instead. You can get it by opening the short link in a browser and copying the redirected URL.');
+                showError(elements.urlError, getUserErrorMessage(err, 'Failed to check file.'));
             } else if (err.message.includes('401') || err.message.includes('password')) {
                 showPasswordSection('This transfer is password-protected.');
             } else {
-                showError(elements.urlError, err.message || 'Failed to check file. Please verify the URL.');
+                showError(elements.urlError, getUserErrorMessage(err, 'Failed to check file. Please verify the URL.'));
             }
         } finally {
             setLoading(elements.checkBtn, false);
@@ -1040,7 +1040,7 @@
             if (err.message.includes('401') || err.message.includes('password')) {
                 showError(elements.passwordError, 'Incorrect password. Please try again.');
             } else {
-                showError(elements.passwordError, err.message || 'Failed to verify password.');
+                showError(elements.passwordError, getUserErrorMessage(err, 'Failed to verify password.'));
             }
         } finally {
             setLoading(elements.passwordBtn, false);
@@ -1088,7 +1088,7 @@
             await startDownload(currentFileInfo);
         } catch (err) {
             if (err.name !== 'AbortError' && err.name !== 'AuthError') {
-                showError(elements.downloadError, err.message || 'Download failed. Please try again.');
+                showError(elements.downloadError, getUserErrorMessage(err, 'Download failed. Please try again.'));
                 elements.retryBtn.hidden = false;
             }
             hideProgress();
@@ -1270,6 +1270,18 @@
             return decodeURIComponent(name);
         }
         return null;
+    }
+
+    function getUserErrorMessage(err, fallback) {
+        const msg = (err && err.message) || '';
+        if (!msg) return fallback;
+        if (msg.includes('blocked by WeTransfer')) return 'Short WeTransfer links (we.tl/...) may be blocked on data center IPs. Use the full download link (wetransfer.com/downloads/...) instead.';
+        if (msg.includes('401') || msg.toLowerCase().includes('password')) return 'Incorrect password. Please try again.';
+        if (msg.includes('429')) return 'Too many requests. Please wait a moment and try again.';
+        if (msg.includes('503') || msg.includes('502')) return 'The file host is temporarily unavailable. Please try again later.';
+        if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) return 'Network error. Please check your connection and try again.';
+        if (msg.startsWith('HTTP ') || msg.startsWith('Server error:')) return fallback;
+        return msg.length < 120 ? msg : fallback;
     }
 
     function formatBytes(bytes) {
